@@ -1,6 +1,5 @@
 #!/usr/bin/python
-
-import math, collections, heapq, time, socket, select, errno
+import math, collections, heapq, logging, time, socket, select, errno
 
 from iinic import extract_token, \
     PlainByteToken, \
@@ -36,6 +35,7 @@ class Client(object):
         self.peer = '%s:%d' % socket.getpeername()
         self.connected = True
         self.resetState()
+        logging.info('peer %s is connected', self.peer)
 
     def resetState(self):
         self.channel = 1
@@ -57,6 +57,7 @@ class Client(object):
         return self.socket.fileno()
 
     def disconnected(self):
+        logging.info('peer %s is disconnected', self.peer)
         self.connected = False
         self.server.disconnected(self)
         self.socket.close()
@@ -64,9 +65,8 @@ class Client(object):
     def recv(self):
         try:
             rx = self.socket.recv(4096)
-        except OSError as err:
-            if err.errno != errno.ECONNRESET:
-                raise
+        except IOError as err:
+            logging.error('exception while receiving from peer %s: %r', self.peer, err)
             rx = ''
 
         if '' == rx:
@@ -82,9 +82,9 @@ class Client(object):
                 break
             self.rxbuf = self.rxbuf[e.LENGTH:]
             if isinstance(e, PlainByteToken):
-                self.txqueue += e.byte
+                self.queueTxByte(e.byte)
             elif isinstance(e, UnescapeToken):
-                self.txqueue += e.ESCAPE
+                self.queueTxByte(e.ESCAPE)
             else:
                 self.cmdqueue.append(e)
 
@@ -96,10 +96,15 @@ class Client(object):
             return
         try:
             self.socket.send(m)
-        except OSError as err:
-            if err.errno != errno.ECONNRESET:
-                raise
+        except IOError as err:
+            logging.error('exception while sending to peer %s: %r', self.peer, err)
             self.disconnected()
+
+    def queueTxByte(self, b):
+        if len(self.txqueue) == 765:
+            logging.warning('peer %s hit txqueue length limit', self.peer)
+        if len(self.txqueue) < 768:
+            self.txqueue += b
 
     def runCommand(self):
         if 0 == len(self.cmdqueue):
@@ -139,23 +144,38 @@ class Client(object):
         self.nextCommand()
 
     def setChannelCommand(self, e):
-        self.channel = e.channel
-        self.send(e.serialize())
+        if not (0 <= e.channel < 32):
+            logging.warning('peer %s tries to use invalid channel %d', self.peer, e.channel)
+        else:
+            self.channel = e.channel
+            self.send(e.serialize())
         self.nextCommand()
+
     def setPowerCommand(self, e):
         self.power = e.power
         self.nextCommand()
+
     def setBitrateCommand(self, e):
-        self.bitrate = e.bitrate
-        self.send(e.serialize())
+        if not (300 <= e.bitrate <= 115200):
+            logging.warning('peer %s tries to set invalid bitrate %d', self.peer, e.bitrate)
+        else:
+            self.bitrate = e.bitrate
+            self.send(e.serialize())
         self.nextCommand()
 
     def timingCommand(self, e):
         timing = self.timing
         etiming = (e.timing_hi << 32) | e.timing_lo
+
         if etiming <= timing:
             self.nextCommand()
             return
+
+        if etiming - timing > 30000000:
+            logging.warning('peer %s tries to use very large delay: %d', self.peer, (etiming - timing))
+            self.nextCommand()
+            return
+
         t = self.server.time + 1e-6 * (etiming - timing)
         self.server.queue(t, self.nextCommand)
     
@@ -273,5 +293,10 @@ class Server(object):
             evts = self.poll.poll(timeout)
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        format = '%(asctime)s %(message)s',
+        datefmt = '%Y-%m-%d %H:%M:%S',
+        level = logging.INFO
+    )
     Server('0.0.0.0', 2048).loop()
 

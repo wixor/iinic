@@ -150,7 +150,7 @@ class NIC(object):
             timing_hi = timing >> 32
         ).serialize())
 
-    def set_chan(self, channel):
+    def set_channel(self, channel):
         if self._txchannel == channel:
             return
         self._txchannel = channel
@@ -223,6 +223,7 @@ class NIC(object):
         elif isinstance(e, PingToken):
             if e.seq in self._pings:
                 self._pings[e.seq].acked = True
+                del self._pings[e.seq]
         else:
             raise IOError('unexpected token received from NIC: %r' % e)
 
