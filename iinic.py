@@ -1,4 +1,4 @@
-import math, time, socket, select, struct, collections
+import math, random, time, socket, select, struct, collections
 
 RxByte = collections.namedtuple('RxByte', ('byte', 'bitrate', 'channel', 'power', 'timing'))
 
@@ -111,7 +111,11 @@ class NIC(object):
     def __init__(self, comm, deadline=None):
         self._comm = comm
         self._pingseq = 0
+        self._dummy_id = random.randint(1,65534)
         self.reset(deadline)
+
+    def get_uniq_id(self):
+        return self._dummy_id
 
     def reset(self, deadline=None):
         self._pings = dict()

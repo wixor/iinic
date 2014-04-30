@@ -126,6 +126,13 @@ osobny wątek dla każdego otwartego połączenia TCP.
 Metody API
 ----------
 
+* `get_uniq_id()`:  
+  Ta metoda zwraca unikalny identyfikator karty sieciowej. Identyfikator
+  ten jest liczbą całkowitą z zakresu 0x0001 do 0xFFFE, czyli dwubajtową
+  liczbą bez znaku, która nie jest ciągiem samych zer ani samych jedynek.
+  Na symulatorze, z racji braku fizycznego urządzenia, identyfikator ten
+  jest losowany przy każdym uruchomieniu programu; może to prowadzić do
+  kolizji.
 * `ping()`:  
   Ta metoda wysyła "pinga" do karty sieciowej. Karta odpowiada nia niego
   natychmiast (oczywiście kiedy dojdzie do niego w kolejce poleceń). Metoda ta
