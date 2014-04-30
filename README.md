@@ -133,6 +133,11 @@ Metody API
   Na symulatorze, z racji braku fizycznego urządzenia, identyfikator ten
   jest losowany przy każdym uruchomieniu programu; może to prowadzić do
   kolizji.
+* `get_approx_timing()`:  
+  Ta metoda zwraca przybliżoną aktualną wartość zegarka na karcie sieciowej.
+  Nie ma żadnych gwarancji ani oszacowań na jakość tego przybliżenia.
+  Błąd może być dowolnie wielki, jednak mamy nadzieję, że będzie mieścił
+  się w zakresie kilkudziesięciu milisekund.
 * `ping()`:  
   Ta metoda wysyła "pinga" do karty sieciowej. Karta odpowiada nia niego
   natychmiast (oczywiście kiedy dojdzie do niego w kolejce poleceń). Metoda ta

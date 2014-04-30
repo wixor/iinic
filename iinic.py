@@ -117,6 +117,9 @@ class NIC(object):
     def get_uniq_id(self):
         return self._dummy_id
 
+    def get_approx_timing(self):
+        return int(math.ceil(1e+6 * (time.time() - self._t0)))
+
     def reset(self, deadline=None):
         self._pings = dict()
         self._rxbuf = ''
@@ -139,6 +142,8 @@ class NIC(object):
         self._rxbytes = 0
         self._rxpower = None
         self._rxqueue = []
+
+        self._t0 = time.time() - self._rxtiming * 1e-6
 
     def ping(self):
         seq = self._pingseq = self._pingseq+1
