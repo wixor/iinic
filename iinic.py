@@ -99,14 +99,9 @@ class PingFuture(object):
         self.acked = False
 
     def await(self, deadline=None):
-        rx = []
-        while not self.acked:
-            e,b = self.nic._rx(deadline)
-            if e is None:
-                break
-            if b is not None:
-                rx.append(b)
-        return (self.acked, rx)
+        while not self.acked and self.nic._rx(deadline) is not None:
+            pass
+        return self.acked
 
 class NIC(object):
     def __init__(self, comm, deadline=None):
@@ -121,7 +116,7 @@ class NIC(object):
         self._comm.send(ResetRqToken().serialize())
 
         while True:
-            e,b = self._rx(deadline)
+            e = self._rx(deadline)
             if e is None:
                 raise IOError('failed to reset NIC in given time')
             if isinstance(e, ResetAckToken):
@@ -134,6 +129,7 @@ class NIC(object):
         self._rxtiming = e.timing_lo + (e.timing_hi<<32)
         self._rxbytes = 0
         self._rxpower = None
+        self._rxqueue = []
 
     def ping(self):
         seq = self._pingseq = self._pingseq+1
@@ -142,7 +138,7 @@ class NIC(object):
         return future
 
     def sync(self, deadline=None):
-        return self.ping().await(deadline)
+        self.ping().await(deadline)
 
     def timing(self, timing):
         self._comm.send(TimingTagToken(
@@ -202,15 +198,14 @@ class NIC(object):
 
     def _rx(self, deadline = None):
         e = self._nextToken(deadline)
-        b = None
         if e is None:
             pass
         elif isinstance(e, ResetAckToken):
             pass
         elif isinstance(e, UnescapeToken):
-            b = self._rxbyte(Token.ESCAPE)
+            self._rxqueue.append(self._rxbyte(Token.ESCAPE))
         elif isinstance(e, PlainByteToken):
-            b = self._rxbyte(e.byte)
+            self._rxqueue.append(self._rxbyte(e.byte))
         elif isinstance(e, ChannelTagToken):
             self._rxchannel = e.channel
         elif isinstance(e, PowerTagToken):
@@ -227,15 +222,18 @@ class NIC(object):
         else:
             raise IOError('unexpected token received from NIC: %r' % e)
 
-        return (e,b)
+        return e
 
     def rx(self, deadline = None):
         while True:
-            e,b = self._rx(deadline)
+            if len(self._rxqueue) > 0:
+                b = self._rxqueue[0]
+                self._rxqueue = self._rxqueue[1:]
+                return b
+
+            e = self._rx(deadline)
             if e is None:
                 return None
-            if b is not None:
-                return b
 
 class NetComm(object):
     def __init__(self, host='themis.lo14.wroc.pl', port=2048):

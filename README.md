@@ -132,10 +132,9 @@ Metody API
   zwraca obiekt `PingFuture`. Pole `acked` tego obiektu jest bool-em, który 
   mówi, czy karta odpowiedziała już na wysłanego ping-a. Metoda `await()` tego
   obiektu zawiesza program dopóki nie otrzymamy odpowiedzi na pinga. Metoda ta
-  przyjmuje argument `deadline` (opisany wyżej) oraz zwraca parę dwóch wartości:
-  pierwsza jest bool-em mówiącym o tym, czy doczekaliśmy się odpowiedzi na
-  ping-a (mogliśmy się nie doczekać, jeżeli minął deadline); druga jest listą
-  bajtów, które odebrała karta sieciowa, zanim odpowiedziała na ping-a.
+  przyjmuje argument `deadline` (opisany wyżej) oraz zwraca bool-a mówiącego
+  o tym, czy doczekaliśmy się odpowiedzi na ping-a (mogliśmy się nie doczekać,
+  jeżeli minął deadline)
 * `sync(deadline = None)`:  
   Ta metoda synchronizuje komputer z kartą sieciową przy użyciu ping-a:
   wysyłamy ping-a, czekamy aż karta nam go odeśle i wtedy wiemy, że jesteśmy
@@ -165,4 +164,9 @@ Metody API
   powyżej; jeżeli żaden bajt nie zostanie odebrany przed upływem deadline-u,
   funkcja ta zwraca `None`. Każdy odebrany bajt jest reprezentowany przez
   obiekt `RxByte`, który zawiera pola `byte`, `bitrate`, `channel`, `power`
-  oraz `timing`.
+  oraz `timing`. Należy zauważyć, że odebrany bajt może pochodzić z przeszłości:
+  na przykład podczas, gdy oczekiwaliśmy na synchronizację z kartą sieciową przy
+  użyciu metody sync(), karta mogła odbierać dane; metoda rx() zwróci je zanim
+  przystąpi do pobierania danych aktualnie transmitowanych na łączu. Krótko
+  mówiąc, metoda rx() zwraca kolejne bajty, które usłyszała karta sieciowa nawet,
+  jeżeli nasz program przez jakiś czas "nie uważał".
