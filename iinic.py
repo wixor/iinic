@@ -97,11 +97,15 @@ class PingFuture(object):
         self.nic = nic
         self.seq = seq
         self.acked = False
+        self.callbacks = []
 
     def await(self, deadline=None):
         while not self.acked and self.nic._rx(deadline) is not None:
             pass
         return self.acked
+
+    def add_callback(self, cb):
+        self.callbacks.append(cb)
 
 class NIC(object):
     def __init__(self, comm, deadline=None):
@@ -122,7 +126,8 @@ class NIC(object):
             if isinstance(e, ResetAckToken):
                 break
 
-        self._txbuf = ''
+        self._txqueuelen = 0
+        self._txping = None
         self._txchannel = self._rxchannel = e.channel
         self._txbitrate = self._rxbitrate = e.bitrate
         self._txpower = self._last_txpower = e.power
@@ -161,9 +166,21 @@ class NIC(object):
     def set_power(self, power):
         self._txpower = power
 
-    def tx(self, payload):
+    def tx(self, payload, overrun_fail=True, deadline=None):
         if not payload:
             return
+
+        nic_txbuf_size = 768
+
+        if len(payload) > nic_txbuf_size:
+            raise IOError('packet is too large')
+
+        if not overrun_fail:
+            while self._txqueuelen + len(payload) > nic_txbuf_size and \
+                  self._rx(deadline) is not None:
+              pass
+        if self._txqueuelen + len(payload) > nic_txbuf_size:
+            raise IOError('tx buffer overrun')
 
         if self._txpower != self._last_txpower:
             self._last_txpower = self._txpower
@@ -173,6 +190,14 @@ class NIC(object):
             payload.replace(Token.ESCAPE, Token.ESCAPE + UnescapeToken.TAG) +
             TxToken().serialize()
         )
+
+        self._txqueuelen += len(payload)
+
+        def ping_cb():
+            self._txqueuelen -= len(payload)
+        ping = self.ping()
+        ping.add_callback(ping_cb)
+        return ping
 
     def _nextToken(self, deadline = None):
         while True:
@@ -217,8 +242,10 @@ class NIC(object):
             self._rxbytes = 0
         elif isinstance(e, PingToken):
             if e.seq in self._pings:
-                self._pings[e.seq].acked = True
-                del self._pings[e.seq]
+                ping = self._pings.pop(e.seq)
+                ping.acked = True
+                for cb in ping.callbacks:
+                    cb()
         else:
             raise IOError('unexpected token received from NIC: %r' % e)
 

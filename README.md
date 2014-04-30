@@ -58,7 +58,7 @@ sieciowa (ani prawdziwa ani symulowana) nie będzie pamiętała waszych ustawie�
 więc jeżeli chcecie je zmienić, musicie wysłać odpowiednie komendy przy każdym
 uruchomieniu programu.
 
-Osoby, które znają git-a i chciałyby coś napisać w tym projekcie, zachęcam do
+Osoby, które znają gita i chciałyby coś napisać w tym projekcie, zachęcam do
 korzystania z niniejszego repo; dajcie znać, a dodam wam dostępy. Jeżeli w
 trakcie prac dojdziecie do wniosku, że coś zachowuje się dziwnie, odniesiecie
 wrażenie, że serwer umarł, lub coś w tym stylu -- niewykluczone, że macie rację,
@@ -110,7 +110,7 @@ Dzięki deadline-om wystarczy, że procedura wyższego poziomu przyjmie jako
 argument swój deadline i będzie przekazywała go do wszystkich wywołań niższego
 poziomu. Nie musimy ciągle martwić się o to, ile czasu minęło od ostatniej
 operacji i ile w związku z tym czasu nam pozostało (takie obliczenia
-musielibyśmy wykonywać non-stop, gdybyśmy korzystali z timeout-ów).
+musielibyśmy wykonywać non-stop, gdybyśmy korzystali z timeoutów).
 
 Dobrze byłoby, aby protokoły wyższego poziomu eksponowały w pełne możliwości
 protokołów niższego poziomu (w szczególności aby procedury protokołów wyższego
@@ -130,14 +130,21 @@ Metody API
   Ta metoda wysyła "pinga" do karty sieciowej. Karta odpowiada nia niego
   natychmiast (oczywiście kiedy dojdzie do niego w kolejce poleceń). Metoda ta
   zwraca obiekt `PingFuture`. Pole `acked` tego obiektu jest bool-em, który 
-  mówi, czy karta odpowiedziała już na wysłanego ping-a. Metoda `await()` tego
+  mówi, czy karta odpowiedziała już na wysłanego pinga. Metoda `await()` tego
   obiektu zawiesza program dopóki nie otrzymamy odpowiedzi na pinga. Metoda ta
-  przyjmuje argument `deadline` (opisany wyżej) oraz zwraca bool-a mówiącego
-  o tym, czy doczekaliśmy się odpowiedzi na ping-a (mogliśmy się nie doczekać,
-  jeżeli minął deadline)
+  przyjmuje argument `deadline` (opisany wyżej) oraz zwraca boola mówiącego
+  o tym, czy doczekaliśmy się odpowiedzi na pinga (mogliśmy się nie doczekać,
+  jeżeli minął deadline). Metoda `add_callback(cb)` tego obiektu pozwala
+  zarejestrować funkcję, która zostanie wywołana, gdy karta odpowie na tego
+  pinga. Uwaga: funkcja ta zostanie wywołana w nieprzewidywalnym momencie,
+  z nieprzewidywalnego miejsca w kodzie. W szczególności może ona zostać
+  wywołana z kodu obsługi transmisji lub z innego kodu, który manipuluje
+  stanem karty sieciowej. W związku z tym, funkcja ta absolutnie nie może
+  wykonywać żadnych operacji na obiekcie `NIC`; należy również zachować
+  najwyższą ostrożność używając tej funkcji do manipulacji stanem programu.
 * `sync(deadline = None)`:  
-  Ta metoda synchronizuje komputer z kartą sieciową przy użyciu ping-a:
-  wysyłamy ping-a, czekamy aż karta nam go odeśle i wtedy wiemy, że jesteśmy
+  Ta metoda synchronizuje komputer z kartą sieciową przy użyciu pinga:
+  wysyłamy pingna, czekamy aż karta nam go odeśle i wtedy wiemy, że jesteśmy
   zsynchronizowani. Zwracana wartość ma takie same znaczenie jak w przypadku
   metody `PingFuture.await`.
 * `timing(timing)`:  
@@ -154,11 +161,22 @@ Metody API
   Ta metoda wysyła do karty polecenie zmiany mocy nadawania na `power`.
   Nie wiadomo jeszcze, jaka jest semantyka tej wartości. Podana tutaj wartość
   zostanie użyta przy następnym nadawaniu.
-* `tx(payload)`:  
+* `tx(payload, overrun_fail=True, deadline=None)`:  
   Ta metoda wysyła do karty polecenie nadania wiadomości `payload`. Należy
-  pamiętać, że proces nadawania trwa nietrywialną ilość czasu. Program na
-  komputerze nie jest blokowany na czas nadawania, natomiast dopóki nadawanie
-  nie zakończy się, karta nie będzie przetwarzała poleceń.
+  pamiętać, że proces nadawania trwa nietrywialną ilość czasu. Domyślnie program
+  na komputerze nie jest blokowany na czas nadawania, natomiast dopóki nadawanie
+  nie zakończy się, karta nie będzie przetwarzała poleceń. Bufor nadawczy karty
+  ma ograniczoną pojemność; w związku z tym nie możemy zakolejkować wielkiej
+  ilości danych do wysłania. Obiekt `NIC` przy użyciu pingów śledzi ilość danych,
+  które znajdują się w kolejce karty. Jeżeli okaże się, że zakolejkowanie danej
+  wiadomości spowodowałoby przekroczenie rozmiaru bufora, metoda tx() zgłosi
+  wyjątek. Na potrzeby debuggowania oraz implementacji bardzo prostych protokołów
+  udostępniona jest opcja `overrun_fail`. Ustawienie jej na wartość `False`
+  spowoduje, że metoda tx() będzie oczekiwała na to, aż w buforze karty zrobi się
+  wystarczająco dużo miejsca na zakolejkowanie danego pakietu. Oczekiwanie to jest
+  ograniczone czasem `deadline`. Dokładny czas takiego oczekiwania jest jednak
+  trudny do ustalenia. Metoda tx() zwraca obiekt `PingFuture`; karta wyśle
+  potwierdzenie tego pinga w momencie, gdy zakończy nadawanie wiadomości.
 * `rx(deadline = None)`:  
   Ta metoda odbiera z karty jeden bajt danych. Argument `deadline` jest opisany
   powyżej; jeżeli żaden bajt nie zostanie odebrany przed upływem deadline-u,
