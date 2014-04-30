@@ -8,6 +8,7 @@ from iinic import extract_token, \
     PingToken, TxToken
 
 TxByte = collections.namedtuple('TxByte', ('client', 'byte', 'channel', 'power', 'bitrate'))
+MyTxToken = collections.namedtuple('MyTxToken', ('buf'))
 
 ### ----------------------------------------------------------------------- ###
 
@@ -47,7 +48,7 @@ class Client(object):
         self.rxbuf = ''
         self.cmdqueue = []
         self.txqueue = ''
-        self.txremaining = 0
+        self.txremaining = ''
 
     @property
     def timing(self):
@@ -85,6 +86,9 @@ class Client(object):
                 self.queueTxByte(e.byte)
             elif isinstance(e, UnescapeToken):
                 self.queueTxByte(e.ESCAPE)
+            elif isinstance(e, TxToken):
+                self.cmdqueue.append(MyTxToken(self.txqueue))
+                self.txqueue = ''
             else:
                 self.cmdqueue.append(e)
 
@@ -101,10 +105,7 @@ class Client(object):
             self.disconnected()
 
     def queueTxByte(self, b):
-        if len(self.txqueue) == 765:
-            logging.warning('peer %s hit txqueue length limit', self.peer)
-        if len(self.txqueue) < 768:
-            self.txqueue += b
+        self.txqueue += b
 
     def runCommand(self):
         if 0 == len(self.cmdqueue):
@@ -122,7 +123,7 @@ class Client(object):
             self.timingCommand(e)
         elif isinstance(e, PingToken):
             self.pingCommand(e)
-        elif isinstance(e, TxToken):
+        elif isinstance(e, MyTxToken):
             self.txCommand(e)
 
     def nextCommand(self):
@@ -184,16 +185,15 @@ class Client(object):
         self.nextCommand()
 
     def txCommand(self, e):
-        self.txremaining = len(self.txqueue)
+        self.txremaining = e.buf
         self.txNext()
 
     def txNext(self):
-        if 0 == self.txremaining:
+        if 0 == len(self.txremaining):
             self.nextCommand()
             return
-        b = self.txqueue[0]
-        self.txqueue = self.txqueue[1:]
-        self.txremaining -= 1
+        b = self.txremaining[0]
+        self.txremaining = self.txremaining[1:]
         self.server.tx(TxByte(
             client = self,
             byte = b,
