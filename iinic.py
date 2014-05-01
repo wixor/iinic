@@ -1,4 +1,4 @@
-import math, random, time, socket, select, struct, collections
+import math, os, termios, time, socket, select, struct, collections
 
 RxByte = collections.namedtuple('RxByte', ('byte', 'bitrate', 'channel', 'power', 'timing'))
 
@@ -60,16 +60,16 @@ def make_token(name, tag, fieldfmt='', fieldnames=()):
 
 UnescapeToken = make_token('UnescapeToken', '\xa5')
 ResetRqToken = make_token('ResetRqToken', '\x01')
-ResetAckToken = make_token('ResetAckToken', '\x5a', '<BBIIH', ('channel', 'power', 'bitrate', 'timing_lo', 'timing_hi'))
-ChannelTagToken = make_token('ChannelTagToken', '\x02', '<B', ('channel',))
+ResetAckToken = make_token('ResetAckToken', '\x5a', '<BBHHI', ('version_high', 'version_low', 'uniq_id', 'timing_lo', 'timing_hi'))
+RxKnobsTagToken = make_token('RxKnobsTagToken', '\x02', '<HBB', ('frequency', 'deviation', 'rx_knobs'))
 PowerTagToken = make_token('PowerTagToken', '\x03', '<B', ('power',))
-BitrateTagToken = make_token('BitrateTagToken', '\x04', '<I', ('bitrate',))
-TimingTagToken = make_token('TimingTagToken', '\x05', '<IH', ('timing_lo','timing_hi'))
+BitrateTagToken = make_token('BitrateTagToken', '\x04', '<B', ('bitrate',))
+TimingTagToken = make_token('TimingTagToken', '\x05', '<HI', ('timing_lo','timing_hi'))
 PingToken = make_token('PingToken', '\x06', '<I', ('seq', ))
 TxToken = make_token('TxToken', '\x07')
 
 allTokens = (
-    UnescapeToken, ResetRqToken, ResetAckToken, ChannelTagToken,
+    UnescapeToken, ResetRqToken, ResetAckToken, RxKnobsTagToken,
     PowerTagToken, BitrateTagToken, TimingTagToken,
     PingToken, TxToken,
 )
@@ -107,11 +107,13 @@ class PingFuture(object):
     def add_callback(self, cb):
         self.callbacks.append(cb)
 
+def timing2us(timing): return timing * 0.54253472
+def us2timing(s): return int(math.ceil(s*1.8432))
+
 class NIC(object):
     def __init__(self, comm, deadline=None):
         self._comm = comm
         self._pingseq = 0
-        self._dummy_id = random.randint(1,65534)
         self.reset(deadline)
 
     def get_uniq_id(self):
@@ -135,15 +137,15 @@ class NIC(object):
 
         self._txqueuelen = 0
         self._txping = None
-        self._txchannel = self._rxchannel = e.channel
-        self._txbitrate = self._rxbitrate = e.bitrate
-        self._txpower = self._last_txpower = e.power
-        self._rxtiming = e.timing_lo + (e.timing_hi<<32)
+        self._txchannel = self._rxchannel = None
+        self._txbitrate = self._rxbitrate = None
+        self._txpower = self._last_txpower = self._rxpower = None
+        self._rxtiming = e.timing_lo + (e.timing_hi<<16)
         self._rxbytes = 0
-        self._rxpower = None
         self._rxqueue = []
+        self._uniq_id = e.uniq_id
 
-        self._t0 = time.time() - self._rxtiming * 1e-6
+        self._t0 = time.time() - 1e-6 * timing2us(self._rxtiming)
 
     def ping(self):
         seq = self._pingseq = self._pingseq+1
@@ -155,11 +157,13 @@ class NIC(object):
         self.ping().await(deadline)
 
     def timing(self, timing):
+        timing = us2timing(timing)
         self._comm.send(TimingTagToken(
-            timing_lo = timing & (1<<32)-1,
-            timing_hi = timing >> 32
+            timing_lo = timing & (1<<16)-1,
+            timing_hi = timing >> 16
         ).serialize())
 
+    """ FIXME 
     def set_channel(self, channel):
         if self._txchannel == channel:
             return
@@ -174,12 +178,13 @@ class NIC(object):
 
     def set_power(self, power):
         self._txpower = power
+    """
 
     def tx(self, payload, overrun_fail=True, deadline=None):
         if not payload:
             return
 
-        nic_txbuf_size = 768
+        nic_txbuf_size = 1536
 
         if len(payload) > nic_txbuf_size:
             raise IOError('packet is too large')
@@ -227,7 +232,7 @@ class NIC(object):
             bitrate = self._rxbitrate,
             channel = self._rxchannel,
             power = self._rxpower,
-            timing = int(self._rxtiming + (rxbytes-1) * 8e+6 / self._rxbitrate)
+            timing = int(timing2us(self._rxtiming) + (rxbytes-1) * 8e+6 / self._rxbitrate)
         )
 
     def _rx(self, deadline = None):
@@ -240,14 +245,10 @@ class NIC(object):
             self._rxqueue.append(self._rxbyte(Token.ESCAPE))
         elif isinstance(e, PlainByteToken):
             self._rxqueue.append(self._rxbyte(e.byte))
-        elif isinstance(e, ChannelTagToken):
-            self._rxchannel = e.channel
         elif isinstance(e, PowerTagToken):
             self._rxpower = e.power
-        elif isinstance(e, BitrateTagToken):
-            self._rxbitrate = e.bitrate
         elif isinstance(e, TimingTagToken):
-            self._rxtiming = e.timing_lo + (e.timing_hi<<32)
+            self._rxtiming = e.timing_lo + (e.timing_hi<<16)
             self._rxbytes = 0
         elif isinstance(e, PingToken):
             if e.seq in self._pings:
@@ -299,4 +300,67 @@ class NetComm(object):
 
     def fileno(self):
         return self._sock.fileno()
+
+class USBComm(object):
+    def __init__(self, device=None):
+        if device is None:
+            device = USBComm.detect_device()
+        self._fd = os.open(device, os.O_RDWR | os.O_NOCTTY)
+
+        rawmode = [
+            0, # iflags
+            0, # oflags
+            termios.CS8, # cflags
+            0, # lflag
+            termios.B115200, # ispeed
+            termios.B115200, # ospeed
+            [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] # cc; vmin=1, vtime=0
+        ]
+        termios.tcsetattr(self._fd, termios.TCSADRAIN, rawmode)
+
+        self._poll = select.poll()
+        self._poll.register(self._fd, select.POLLIN)
+
+    @staticmethod
+    def detect_device():
+        sysfsdir = '/sys/bus/usb-serial/devices/'
+        magic = 'FT232R USB UART'
+
+        candidates = []
+        for devname in os.listdir(sysfsdir):
+            magicfile = os.path.realpath(sysfsdir + devname + '/../interface')
+            if not os.path.isfile(magicfile):
+                continue
+            with open(magicfile, 'r') as f:
+                if not f.read().startswith(magic):
+                    continue
+            candidates.append(devname)
+
+        if not candidates:
+            raise IOError('no iinic detected; you may pass device= argument if you know where the device is')
+        if len(candidates) > 1:
+            raise IOError('more than one possible iinic detected (' + ', '.join(candidates) + '); pass device= argument to select one')
+        return '/dev/' + candidates[0]
+
+    def recv(self, deadline = None):
+        if deadline is None:
+            timeout = None
+        elif deadline == 0:
+            timeout = 0
+        else:
+            timeout = max(0, deadline - time.time())
+            timeout = int(math.ceil(1000. * timeout))
+
+        if not self._poll.poll(timeout):
+            return None
+        rx = os.read(self._fd, 4096)
+        print 'recv: ' + ' '.join(['%02x' % ord(c) for c in rx])
+        return rx
+
+    def send(self, data):
+        print 'send: ' + ' '.join(['%02x' % ord(c) for c in data])
+        os.write(self._fd, data)
+
+    def fileno(self):
+        return self._fd
 

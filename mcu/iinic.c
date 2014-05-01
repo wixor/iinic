@@ -102,10 +102,9 @@ struct rx_knobs_token {
      */
 };
 struct reset_ack_token {
+    uint8_t version_high;
+    uint8_t version_low;
     uint16_t uniq_id;
-    struct rx_knobs_token rx_knobs;
-    uint8_t power;
-    uint8_t bitrate;
     struct timing timing;
 };
 struct power_tag_token {
@@ -783,14 +782,9 @@ static void op_init()
     radio_init();
 
     struct reset_ack_token token = {
+        .version_high = 1,
+        .version_low = 0,
         .uniq_id = read_uniq_id(),
-        .rx_knobs = {
-            .frequency = RADIO_DEFAULT_FREQUENCY,
-            .deviation = RADIO_DEFAULT_DEVIATION,
-            .rx_knobs = RADIO_DEFAULT_RX_KNOBS
-        },
-        .power = RADIO_DEFAULT_POWER,
-        .bitrate = RADIO_DEFAULT_BITRATE,
         .timing = get_now()
     };
 
