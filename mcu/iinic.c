@@ -5,7 +5,6 @@
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
 #include <avr/wdt.h>
-#include <avr/eeprom.h>
 
 static inline void nop() {
     asm volatile("nop\n\t" ::: "memory");
@@ -24,14 +23,14 @@ struct timing {
 #define must_read(x) (*(const volatile typeof(x) *)&x)
 #define must_write(x) (*(volatile typeof(x) *)&x)
 
-static volatile uint8_t data_buf[768];
-static volatile uint8_t * data_wr; /* owned by USART_RXC_vect */
-static volatile uint8_t * data_rd; /* owned by main */
+static volatile uint8_t data_buf[1536];
+static volatile uint8_t * data_wr = data_buf; /* owned by USART_RXC_vect */
+static volatile uint8_t * data_rd = data_buf; /* owned by main */
 
-static volatile uint8_t cmd_buf[64];
-static volatile uint8_t * cmd_rd; /* owned by main */
-static volatile uint8_t * cmd_wr; /* owned by USART_RXC_vect */
-static volatile uint8_t * cmd_rdcap;  /* written by USART_RXC_vect, read by main */
+static volatile uint8_t cmd_buf[128];
+static uint8_t cmd_rd; /* owned by main */
+static uint8_t cmd_wr; /* owned by USART_RXC_vect */
+static uint8_t cmd_rdcap;  /* written by USART_RXC_vect, read by main */
 
 static bool data_buf_empty(volatile uint8_t *cap) {
     return data_rd == cap;
@@ -52,9 +51,8 @@ static void data_buf_put(uint8_t byte) {
 
 
 static void cmd_buf_put(uint8_t byte) {
-    *cmd_wr = byte;
-    if(++cmd_wr == cmd_buf + sizeof(cmd_buf))
-        cmd_wr = cmd_buf;
+    cmd_buf[cmd_wr] = byte;
+    cmd_wr = (cmd_wr + 1) & (sizeof(cmd_buf) - 1);
 }
 static void cmd_buf_commit() {
     must_write(cmd_rdcap) = cmd_wr;
@@ -63,20 +61,19 @@ static bool cmd_buf_empty() {
     return cmd_rd == must_read(cmd_rdcap);
 }
 static uint8_t cmd_buf_gettoken() {
-    return *cmd_rd;
+    return cmd_buf[cmd_rd];
 }
 static void cmd_buf_eat(void *_out, uint8_t n)
 {
-    uint8_t *out = (uint8_t *) _out;
+    uint8_t *out = (uint8_t *) _out,
+            *end = out + n;
 
     for(;;)
     {
-        if(++cmd_rd == cmd_buf + sizeof(cmd_buf))
-            cmd_rd = cmd_buf;
-
-        if(0 == n)
+        cmd_rd = (cmd_rd + 1) & (sizeof(cmd_buf) - 1);
+        if(out == end)
             break;
-        *out++ = *cmd_rd;
+        *out++ = cmd_buf[cmd_rd];
     }
 }
 
@@ -105,7 +102,7 @@ struct rx_knobs_token {
      */
 };
 struct reset_ack_token {
-    uint32_t uniq_id;
+    uint16_t uniq_id;
     struct rx_knobs_token rx_knobs;
     uint8_t power;
     uint8_t bitrate;
@@ -278,24 +275,22 @@ static bool timing_geq(const struct timing *a, const struct timing *b)
 
 /* ------------------------------------------------------------------------- */
 
-static volatile uint8_t usart_buf[64];
-static volatile uint8_t * usart_rd; /* owned by USART_UDRE_vect */
-static volatile uint8_t * usart_wr; /* written by main, read by USART_UDRE_vect */
+static volatile uint8_t usart_buf[128];
+static uint8_t usart_rd; /* owned by USART_UDRE_vect */
+static uint8_t usart_wr; /* written by main, read by USART_UDRE_vect */
 
 static bool usart_buf_empty() {
     return usart_rd == must_read(usart_wr);
 }
 static uint8_t usart_buf_get() {
-    uint8_t byte = *usart_rd++;
-    if(usart_rd == usart_buf + sizeof(usart_buf))
-        usart_rd = usart_buf;
+    uint8_t byte = usart_buf[usart_rd];
+    usart_rd = (usart_rd + 1) & (sizeof(usart_buf) - 1);
     return byte;
 }
 static void usart_buf_put(uint8_t byte) {
-    volatile uint8_t *wr = must_read(usart_wr);
-    *wr++ = byte;
-    if(wr == usart_buf + sizeof(usart_buf))
-        wr = usart_buf;
+    uint8_t wr = must_read(usart_wr);
+    usart_buf[wr] = byte;
+    wr = (usart_wr + 1) & (sizeof(usart_buf) - 1);
     must_write(usart_wr) = wr;
 }
 static void usart_buf_put_many(const uint8_t *buf, uint8_t n) {
@@ -320,9 +315,11 @@ enum {
     /* > 0: this many bytes remain for the current token */
 };
 
-static void usart_rx(uint8_t data)
+ISR(USART_RXC_vect)
 {
     static uint8_t state = USART_RX_IDLE;
+
+    uint8_t data = UDR;
 
     if(state == USART_RX_IDLE) {
         if(data != ESCAPE_BYTE)
@@ -368,15 +365,7 @@ static void usart_rx(uint8_t data)
         cmd_buf_commit();
 }
 
-ISR(USART_RXC_vect)
-{
-    UCSRB &=~ _BV(RXCIE);
-    sei();
-    usart_rx(UDR);
-    cli();
-    UCSRB |= _BV(RXCIE);
-}
-ISR(USART_TXC_vect)
+ISR(USART_UDRE_vect)
 {
     if(!usart_buf_empty())
         UDR = usart_buf_get();
@@ -420,12 +409,14 @@ static uint16_t radio_byte_timing;
 
 static void radio_begin() {
     /* set pin low */
+    PORTB &=~ 0x10;
     /* wait > 10ns */
     nop();
     nop();
 }
 static void radio_end() {
     /* set pin high */
+    PORTB |= 0x10;
     /* wait 25ns */
     nop();
     nop();
@@ -499,11 +490,11 @@ static void radio_set_bitrate(uint8_t bitrate)
      *   msb clear => 10000000 / 29 / (bitrate+1)
      *   msb set   => 10000000 / 29 / (bitrate+1) / 8
      * number of timer 1 ticks it takes to send one byte =
-     *   (8 / bitrate) / (16 / fcpu)
+     *   (8 / bitrate) / (8 / fcpu)
      * plugging one into the other gives
      *   byte_timing = 
-     *     msb clear => (8 * fcpu * 29) / (16 * 1e+7) * (x+1)
-     *     msb set   => (8 * fcpu * 29 * 8) / (16 * 1e+7) * (x+1)
+     *     msb clear => (8 * fcpu * 29) / (8 * 1e+7) * (x+1)
+     *     msb set   => (8 * fcpu * 29 * 8) / (8 * 1e+7) * (x+1)
      *  which is
      *     msb clear =>  21.38112 * (x+1)
      *     msb set   => 171.04896 * (x+1)
@@ -511,8 +502,8 @@ static void radio_set_bitrate(uint8_t bitrate)
 
     uint16_t byte_timing =
         bitrate & 0x80
-            ? 171 * ((bitrate & 0x7f) + 1)
-            : 21 * (bitrate+1);
+            ? 342 * ((bitrate & 0x7f) + 1)
+            : 43 * (bitrate+1);
 
     radio_write(0xC600 | bitrate);
     radio_byte_timing = byte_timing;
@@ -774,22 +765,25 @@ static void op_ping(uint32_t seq)
     usart_transmit();
 }
 
-/* ------------------------------------------------------------------------- */
-
-static void panic() {
-    cli();
-    for(;;);
-}
-
-static void reset() {
-    cli();
-    for(;;);
-}
-
-void reset_ack()
+static uint16_t read_uniq_id()
 {
+    EEARH = EEARL = 0;
+    EECR |= _BV(EERE);
+    uint8_t low = EEDR;
+
+    EEARL = 1;
+    EECR |= _BV(EERE);
+    uint8_t high = EEDR;
+
+    return low | high << 8;
+}
+
+static void op_init()
+{
+    radio_init();
+
     struct reset_ack_token token = {
-        .uniq_id = eeprom_read_dword(0),
+        .uniq_id = read_uniq_id(),
         .rx_knobs = {
             .frequency = RADIO_DEFAULT_FREQUENCY,
             .deviation = RADIO_DEFAULT_DEVIATION,
@@ -806,18 +800,107 @@ void reset_ack()
     usart_transmit();
 }
 
+/* ------------------------------------------------------------------------- */
+
+#define SOFT_RESET_MAGIC   0x18b8fc88db2afc2all
+#define SOFT_RESET_CLOBBER 0xffffffffffffffffll
+static volatile uint64_t soft_reset_magic __attribute__((section(".noinit")));
+
+static void dumb_wait(uint8_t n) /* 1 wait round is ~ 17.(7) ms */
+{
+    uint16_t i;
+    asm volatile(
+       "wdr\n\t"
+       "eor %A0, %A0\n\t"
+       "eor %B0, %B0\n\t"
+    "1: adiw %0, 1\n\t" /* 2 cycles */
+       "brne 1b\n\t" /* 2 cycles */
+       "wdr\n\t" /* 1 cycle */
+       "dec %1\n\t" /* 1 cycle */
+       "brne 1b\n\t" /* 2 cycles */
+       : "=w" (i), "+r" (n)
+    );
+}
+
+#define LED_RED 0x80
+#define LED_GREEN 0x40
+static inline void led_on(uint8_t led) { PORTC &=~ led; }
+static inline void led_off(uint8_t led) { PORTC |= led; }
+
+static void blink(uint8_t mask) __attribute__((noreturn));
+static void blink(uint8_t mask)
+{
+    for(;;) {
+        dumb_wait(12);
+        PORTC ^= mask;
+    }
+}
+
+static void panic() {
+    cli();
+    blink(LED_RED);
+}
+static void await_reset_cmd() {
+    blink(LED_GREEN);
+}
+
+static void reset() {
+    soft_reset_magic = SOFT_RESET_MAGIC;
+    cli();
+    for(;;);
+}
+
 int main(void)
 {
+    /* read the reset reason & clear it */
+    uint8_t mcucsr = MCUCSR;
+    MCUCSR &= 0xE0;
+
+    /* read the soft reset flag & clear it */
+    bool soft_reset_flag = (soft_reset_magic == SOFT_RESET_MAGIC);
+    soft_reset_magic = SOFT_RESET_CLOBBER;
+
+    /* disable analog comparator */
     ACSR |= _BV(ACD);
 
-    PORTA=0xFF; DDRA=0xFF;
-    PORTB=0xFF; DDRB=0xFF;
-    PORTC=0xFF; DDRC=0xFF;
-    PORTD=0xFF; DDRD=0xFF;
+    PORTA=0x00; DDRA=0x00; /* port A: analog inputs + arssi */
+    PORTB=0xF3; DDRB=0xB3; /* port B: sck,miso,mosi,ss, data,vdi,!radio_rst, nc */
+    PORTC=0xFF; DDRC=0xC0; /* port C: led1,led2, jtag, i2c */
+    PORTD=0xE6; DDRD=0xF2; /* port D: nc,nc, !usb_rst,!cts, ffit,!radio_irq, txd,rxd */
 
-    radio_init();
+    /* wait around .5s to show the user that we're resetting stuff */
+    dumb_wait(30);
 
-    reset_ack();
+    /* usart: 115200, 8n1, rx interrupt, tx idle interrupt */
+    UBRRH = 0;
+    UBRRL = 7;
+    UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);
+    UCSRB = _BV(RXCIE) | _BV(UDRIE) | _BV(RXEN) | _BV(TXEN);
+
+    /* spi: no interrupts, master mode, F_CPU/8 */
+    SPSR = _BV(SPI2X);
+    SPCR = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
+
+    /* timer 1: normal mode, F_CPU/8, interrupt on overflow */
+    TCCR1B = 0x02;
+    TIMSK = _BV(TOIE1);
+
+    /* 65ms watchdog */
+    WDTCR = _BV(WDE) | _BV(WDP1);
+
+    sei();
+
+    if(!(mcucsr & _BV(WDRF)))
+        await_reset_cmd();
+
+    if(!soft_reset_flag) {
+        led_on(LED_RED);
+        for(;;) wdt_reset();
+    }
+
+    led_on(LED_GREEN);
+
+    op_init();
 
     for(;;)
     {
@@ -825,6 +908,7 @@ int main(void)
 
         if(cmd_buf_empty())
             continue;
+
 
         switch(cmd_buf_gettoken())
         {

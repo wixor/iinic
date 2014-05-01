@@ -1,17 +1,17 @@
-MCU	      := atmega16
-DUDEMCU   := m16
-FLASHSIZE := 16384
-RAMSIZE   := 1024
-LFUSE     ?= E1 # BODLEVEL=1 BODEN=1 SUT=10 CKSEL=0001 (1MHz internal RC, 65ms boot, brown-out detector disabled)
-HFUSE     ?= DF # OCDEN=1 JTAGEN=1 SPIEN=0 CKOPT=1 EESAVE=1 BOOTSZ=11 BOOTRST=1 (OCD, JTAG disabled, SPI enabled)
+MCU       := atmega32
+DUDEMCU   := m32
+FLASHSIZE := 32768
+RAMSIZE   := 2048
+LFUSE     ?= 9F # BODLEVEL=1 BODEN=0 SUT=01 CKSEL=1111
+HFUSE     ?= 01 # OCDEN=0 JTAGEN=0 SPIEN=0 CKOPT=0 EESAVE=0 BOOTSZ=00 BOOTRST=1
 LOCK      ?= 00
 
-CC	  	  := avr-gcc
-LD	  	  := avr-ld
-NM		  := avr-nm
-SIZE	  := avr-size
+CC        := avr-gcc
+LD        := avr-ld
+NM        := avr-nm
+SIZE      := avr-size
 OBJCOPY   := avr-objcopy
-DUDE      := avrdude -p $(DUDEMCU) -c stk500v2 -P /dev/ttyS0 -q -q
+DUDE      := sudo avrdude -p $(DUDEMCU) -c stk500v2 -P usb -q -q
 
 CFLAGS	  := -DF_CPU=14745600 -Os -std=gnu99 -pipe -mmcu=$(MCU) -Wall -Wextra -Wshadow
 
@@ -38,6 +38,8 @@ clean:
 
 erase:
 	$(DUDE) -e
+reset:
+	$(DUDE)
 flash: iinic.hex
 	$(DUDE) -e -U flash:w:iinic.hex:i
 fuses:
