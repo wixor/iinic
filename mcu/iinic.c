@@ -117,7 +117,7 @@ struct timing_tag_token {
     struct timing timing;
 };
 struct ping_token {
-    uint32_t seq;
+    uint8_t seq;
 };
 struct tx_token {
     volatile uint8_t *ptr;
@@ -758,9 +758,6 @@ static void op_ping(uint32_t seq)
     usart_buf_put(ESCAPE_BYTE);
     usart_buf_put(PING_TOKEN);
     usart_buf_put(seq);
-    usart_buf_put(seq >> 8);
-    usart_buf_put(seq >> 16);
-    usart_buf_put(seq >> 24);
     usart_transmit();
 }
 
@@ -865,9 +862,9 @@ int main(void)
     /* wait around .5s to show the user that we're resetting stuff */
     dumb_wait(30);
 
-    /* usart: 115200, 8n1, rx interrupt, tx idle interrupt */
+    /* usart: 230400, 8n1, rx interrupt, tx idle interrupt */
     UBRRH = 0;
-    UBRRL = 7;
+    UBRRL = 3;
     UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);
     UCSRB = _BV(RXCIE) | _BV(UDRIE) | _BV(RXEN) | _BV(TXEN);
 

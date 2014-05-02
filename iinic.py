@@ -65,7 +65,7 @@ RxKnobsTagToken = make_token('RxKnobsTagToken', '\x02', '<HBB', ('frequency', 'd
 PowerTagToken = make_token('PowerTagToken', '\x03', '<B', ('power',))
 BitrateTagToken = make_token('BitrateTagToken', '\x04', '<B', ('bitrate',))
 TimingTagToken = make_token('TimingTagToken', '\x05', '<HI', ('timing_lo','timing_hi'))
-PingToken = make_token('PingToken', '\x06', '<I', ('seq', ))
+PingToken = make_token('PingToken', '\x06', '<B', ('seq', ))
 TxToken = make_token('TxToken', '\x07')
 
 allTokens = (
@@ -148,7 +148,9 @@ class NIC(object):
         self._t0 = time.time() - 1e-6 * timing2us(self._rxtiming)
 
     def ping(self):
-        seq = self._pingseq = self._pingseq+1
+        seq = self._pingseq = (self._pingseq + 1) & 255
+        if seq in self._pings:
+            raise IOError('pings overflow! (' + seq + ')')
         self._pings[seq] = future = PingFuture(self, seq)
         self._comm.send(PingToken(seq=seq).serialize())
         return future
@@ -312,8 +314,8 @@ class USBComm(object):
             0, # oflags
             termios.CS8, # cflags
             0, # lflag
-            termios.B115200, # ispeed
-            termios.B115200, # ospeed
+            termios.B230400, # ispeed
+            termios.B230400, # ospeed
             [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] # cc; vmin=1, vtime=0
         ]
         termios.tcsetattr(self._fd, termios.TCSADRAIN, rawmode)
