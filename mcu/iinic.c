@@ -11,12 +11,12 @@ static inline void nop() {
     asm volatile("nop\n\t" ::: "memory");
 }
 
-static inline void reset() __attribute__((noreturn));
-static inline void panic() __attribute__((noreturn)) __attribute__((always_inline));
+static void reset() __attribute__((noreturn));
+static inline void panic_inline() __attribute__((noreturn)) __attribute__((always_inline));
+static void panic() __attribute__((noreturn));
 
 struct timing {
-    uint16_t low;
-    uint32_t high;
+    uint8_t b[6];
 };
 
 /* ------------------------------------------------------------------------- */
@@ -51,7 +51,6 @@ static void data_buf_put(uint8_t byte) {
 }
 
 
-static inline void cmd_buf_put(uint8_t byte) __attribute__((always_inline));
 static inline void cmd_buf_put(uint8_t byte) {
     cmd_buf[cmd_wr] = byte;
     cmd_wr = (cmd_wr + 1) & (sizeof(cmd_buf) - 1);
@@ -86,35 +85,37 @@ enum {
     UNESCAPE_TOKEN = 0xa5,
     RESET_RQ_TOKEN = 0x01,
     RESET_ACK_TOKEN = 0x5a,
-    RX_KNOBS_TOKEN = 0x02,
-    POWER_TAG_TOKEN = 0x03,
-    BITRATE_TAG_TOKEN = 0x04,
-    TIMING_TAG_TOKEN = 0x05,
+    SET_RX_KNOBS_TOKEN = 0x02,
+    SET_POWER_TOKEN = 0x03,
+    SET_BITRATE_TOKEN = 0x04,
+    TIMING_TOKEN = 0x05,
     PING_TOKEN = 0x06,
     TX_TOKEN = 0x07,
+    FRAME_START_TOKEN = 0x08,
+    FRAME_END_TOKEN = 0x09,
 };
 
-struct rx_knobs_token {
-    uint16_t frequency;
-    uint8_t deviation;
-    uint8_t rx_knobs;
-    /* bits [2:0] = rssi threshold
-     * bits [4:3] = lna gain,
-     * bits [7:5] = bandwidth
-     */
-};
 struct reset_ack_token {
     uint8_t version_high;
     uint8_t version_low;
     uint16_t uniq_id;
 };
-struct power_tag_token {
+struct set_rx_knobs_token {
+    uint16_t frequency;
+    uint8_t deviation;
+    uint8_t rx_knobs;
+    /* bits [2:0] = rssi threshold
+     * bits [4:3] = lna gain
+     * bits [7:5] = bandwidth
+     */
+};
+struct set_power_token {
     uint8_t power;
 };
-struct bitrate_tag_token {
+struct set_bitrate_token {
     uint8_t bitrate;
 };
-struct timing_tag_token {
+struct timing_token {
     struct timing timing;
 };
 struct ping_token {
@@ -122,6 +123,12 @@ struct ping_token {
 };
 struct tx_token {
     volatile uint8_t *ptr;
+};
+struct frame_start_token {
+    struct timing timing;
+    uint8_t rssi;
+};
+struct frame_end_token {
 };
 
 /* ------------------------------------------------------------------------- */
@@ -176,26 +183,30 @@ static inline struct timing get_now()
     uint8_t tmp;
     asm volatile(
         "cli\n\t"
-        "in   %A0, 0x2c\n\t" // TCNT1L
-        "in   %2, 0x38\n\t" // TIFR
-        "sbrc %2, 2\n\t" // TOV1
-        "in   %A0, 0x2c\n\t" // TCNT1L
-        "in   %B0, 0x2d\n\t" // TCNT1H
-        "lds  %A1, timing_high+0\n\t"
-        "lds  %B1, timing_high+1\n\t"
-        "lds  %C1, timing_high+2\n\t"
-        "lds  %D1, timing_high+3\n\t"
+        "in   %0, 0x2c\n\t" // TCNT1L
+        "in   %6, 0x38\n\t" // TIFR
+        "sbrc %6, 2\n\t" // TOV1
+        "in   %0, 0x2c\n\t" // TCNT1L
+        "in   %1, 0x2d\n\t" // TCNT1H
+        "lds  %2, timing_high+0\n\t"
+        "lds  %3, timing_high+1\n\t"
+        "lds  %4, timing_high+2\n\t"
+        "lds  %5, timing_high+3\n\t"
         "sei\n\t"
 
-        "andi %2, 0x04\n\t" // TOV1
+        "andi %6, 0x04\n\t" // TOV1
         "breq 1f\n\t"
-        "subi %A1, 0xFF\n\t"
-        "sbci %B1, 0xFF\n\t"
-        "sbci %C1, 0xFF\n\t"
-        "sbci %D1, 0xFF\n\t"
+        "subi %2, 0xFF\n\t"
+        "sbci %3, 0xFF\n\t"
+        "sbci %4, 0xFF\n\t"
+        "sbci %5, 0xFF\n\t"
     "1:"
-        : "=&r" (ret.low),
-          "=&a" (ret.high),
+        : "=&r" (ret.b[0]),
+          "=&r" (ret.b[1]),
+          "=&a" (ret.b[2]),
+          "=&a" (ret.b[3]),
+          "=&a" (ret.b[4]),
+          "=&a" (ret.b[5]),
           "=&r" (tmp)
     );
     return ret;
@@ -205,20 +216,22 @@ static bool timing_geq(const struct timing *a, const struct timing *b)
 {
     bool ret;
     asm volatile(
-        "cp %A1, %A3\n\t"
-        "cpc %B1, %B3\n\t"
-        "cpc %A2, %A4\n\t"
-        "cpc %B2, %B4\n\t"
-        "cpc %C2, %C4\n\t"
-        "cpc %D2, %D4\n\t"
+        "cp %1, %7\n\t"
+        "cpc %2, %8\n\t"
+        "cpc %3, %9\n\t"
+        "cpc %4, %10\n\t"
+        "cpc %5, %11\n\t"
+        "cpc %6, %12\n\t"
 
         "ldi %0, 0\n\t"
         "brlt 1f\n\t"
         "ldi %0, 1\n\t"
     "1:\n\t"
         : "=&a" (ret)
-        : "r" (a->low), "r" (a->high),
-          "r" (b->low), "r" (b->high)
+        : "r" (a->b[0]), "r" (a->b[1]), "r" (a->b[2]),
+          "r" (a->b[3]), "r" (a->b[4]), "r" (a->b[5]),
+          "r" (b->b[0]), "r" (b->b[1]), "r" (b->b[2]),
+          "r" (b->b[3]), "r" (b->b[4]), "r" (b->b[5])
     );
     return ret;
 }
@@ -227,13 +240,12 @@ static bool timing_geq(const struct timing *a, const struct timing *b)
 
 static volatile uint8_t usart_buf[128];
 static uint8_t usart_rd __attribute__((used)); /* owned by USART_UDRE_vect */
-static uint8_t usart_wr; /* written by main, read by USART_UDRE_vect */
+static uint8_t usart_rdcap __attribute__((used)); /* written by main, read by USART_UDRE_vect */
+static uint8_t usart_wr; /* owned by main */
 
-static void usart_buf_put(uint8_t byte) {
-    uint8_t wr = must_read(usart_wr);
-    usart_buf[wr] = byte;
-    wr = (usart_wr + 1) & (sizeof(usart_buf) - 1);
-    must_write(usart_wr) = wr;
+static inline void usart_buf_put(uint8_t byte) {
+    usart_buf[usart_wr] = byte;
+    usart_wr = (usart_wr + 1) & (sizeof(usart_buf) - 1);
 }
 #if 0
 static void usart_buf_put_hex(uint8_t byte) {
@@ -244,15 +256,16 @@ static void usart_buf_put_hex(uint8_t byte) {
     usart_buf_put(x < 10 ? '0' + x : 'A' + x - 10);
 }
 #endif
-static void usart_transmit() {
+static inline void usart_transmit() {
+    must_write(usart_rdcap) = usart_wr;
     UCSRB |= _BV(UDRIE);
 }
 
 static const PROGMEM uint8_t usart_token_lengths[] = {
-    [RX_KNOBS_TOKEN] = sizeof(struct rx_knobs_token),
-    [POWER_TAG_TOKEN] = sizeof(struct power_tag_token),
-    [BITRATE_TAG_TOKEN] = sizeof(struct bitrate_tag_token),
-    [TIMING_TAG_TOKEN] = sizeof(struct timing_tag_token),
+    [SET_RX_KNOBS_TOKEN] = sizeof(struct set_rx_knobs_token),
+    [SET_POWER_TOKEN] = sizeof(struct set_power_token),
+    [SET_BITRATE_TOKEN] = sizeof(struct set_bitrate_token),
+    [TIMING_TOKEN] = sizeof(struct timing_token),
     [PING_TOKEN] = sizeof(struct ping_token),
 };
 
@@ -297,14 +310,13 @@ ISR(USART_RXC_vect)
             return;
         }
 
-        if(data >= RX_KNOBS_TOKEN && data <= PING_TOKEN) {
+        if(data >= SET_RX_KNOBS_TOKEN && data <= PING_TOKEN) {
             cmd_buf_put(data);
             state = pgm_read_byte(&usart_token_lengths[data]);
             return;
         }
 
-        panic();
-        return;
+        panic_inline();
     }
 
     cmd_buf_put(data);
@@ -321,7 +333,7 @@ ISR(USART_UDRE_vect, ISR_NAKED)
         "push r26\n\t"
 
         "lds  r26, usart_rd\n\t"
-        "lds  r27, usart_wr\n\t"
+        "lds  r27, usart_rdcap\n\t"
         "cp   r26, r27\n\t"
         "breq 1f\n\t"
 
@@ -367,22 +379,46 @@ ISR(USART_UDRE_vect, ISR_NAKED)
 #define RADIO_CRL  6 /* Clock recovery locked */
 #define RADIO_ATGL 5 /* AFC cycle */
 
+#define RADIO_SYNC_LEN 1
 #define RADIO_SYNC_BYTE1 0x2D
 #define RADIO_SYNC_BYTE2 0xD4
 
-#define RADIO_DEFAULT_FREQUENCY 0x680 /* 868.32 MHz */
-#define RADIO_DEFAULT_BITRATE   35 /* ~9600 bps */
-#define RADIO_DEFAULT_POWER     0 /* max */
-#define RADIO_DEFAULT_DEVIATION 9 /* 150 kHz */
+/* ------- the state -------  */
 
-/* bandwidth = 200 kHz, lna gain = -20dB (min), rssi threshold = -103dB (min) */
-#define RADIO_DEFAULT_RX_KNOBS 0x98
-
-static uint8_t radio_power;
-static uint8_t radio_deviation;
+static uint8_t radio_power = 0; /* radio's power-on-reset default */
+static uint8_t radio_deviation = 0; /* radio's power-on-reset default */
 static uint16_t radio_byte_timing;
 
-static inline void radio_begin() __attribute__((always_inline));
+enum {
+    RADIO_CFG_BITRATE = _BV(0),
+    RADIO_CFG_POWER = _BV(1),
+    RADIO_CFG_RX_KNOBS = _BV(2),
+    RADIO_CFG_OK = _BV(3)
+};
+static uint8_t radio_cfg;
+
+enum {
+    RADIO_RX_IDLE  = 0x0000,
+    RADIO_RX_FIRST = 0x0100,
+    RADIO_RX_DATA  = 0x0200,
+    RADIO_RX_END   = 0x0400,
+    RADIO_RX_LOOP  = 0x0800
+};
+
+static uint16_t radio_rx_not_started();
+static uint16_t radio_rx_vdi_wait();
+static uint16_t radio_rx_data_wait();
+static uint16_t radio_rx_on_air();
+static uint16_t radio_rx_aborted();
+
+static struct {
+    uint16_t (*state)();
+    uint16_t deadline;
+    uint8_t rounds;
+} radio_rx_state;
+
+/* ------- raw i/o -------  */
+
 static inline void radio_begin() {
     /* set pin low */
     PORTB &=~ _BV(4);
@@ -390,7 +426,6 @@ static inline void radio_begin() {
     nop();
     nop();
 }
-static inline void radio_end() __attribute__((always_inline));
 static inline void radio_end() {
     /* set pin high */
     PORTB |= _BV(4);
@@ -412,6 +447,20 @@ static void radio_write(uint16_t v)
     radio_io(v & 0xff);
     radio_end();
 }
+
+static inline bool radio_get_irq() {
+    return !(PIND & _BV(2));
+}
+static inline bool radio_get_vdi() {
+    return !!(PINB & _BV(2));
+}
+static inline void radio_irq_wait() {
+    do
+        wdt_reset();
+    while(!radio_get_irq());
+}
+
+/* ------- settings -------  */
 
 static void radio_mode_rx()
 {
@@ -474,8 +523,8 @@ static void radio_set_bitrate(uint8_t bitrate)
      *     msb clear => (8 * fcpu * 29) / (8 * 1e+7) * (x+1)
      *     msb set   => (8 * fcpu * 29 * 8) / (8 * 1e+7) * (x+1)
      *  which is
-     *     msb clear =>  21.38112 * (x+1)
-     *     msb set   => 171.04896 * (x+1)
+     *     msb clear =>  42.76224 * (x+1)
+     *     msb set   => 342.09792 * (x+1)
      */
 
     uint16_t byte_timing =
@@ -490,7 +539,7 @@ static void radio_set_rx_knobs(uint8_t rx_knobs)
 {
     /* 0x9000 = reciever control command
      * p16  = 1 (pin 16 is vdi output)
-     * d1:0 = 01 (vdi in slow mode)
+     * d1:0 = 01 (vdi in medium mode, ie. (rssi or dqd) and clock_locked)
      * rx_knobs [2:0] = rssi threshold
      * rx_knobs [4:3] = lna gain
      * rx_knobs [7:5] = bandwidth
@@ -501,23 +550,31 @@ static void radio_enable_rxfifo()
 {
     /* 0xCA00 = fifo and reset mode command
      * f3:0 = 1000 (fifo interrupt threshold; 8 bits = 1 byte = default)
-     * sp = 1 (one-byte synchronization pattern)
+     * sp = ? (0 = two-byte / 1 = one-byte synchronization pattern)
      * al = 0 (fifo fill start condition: on synchron pattern reception)
      * ff = 1 (fifo fill will be enabled after synchron pattern reception)
      * dr = 0 (sentensive reset mode)
      */
+#if RADIO_SYNC_LEN == 2
+    radio_write(0xCA82);
+#else
     radio_write(0xCA8A);
+#endif
 }
 static void radio_disable_rxfifo()
 {
     /* 0xCA00 = fifo and reset mode command
      * f3:0 = 1000 (fifo interrupt threshold; 8 bits = 1 byte = default)
-     * sp = 1 (one-byte synchronization pattern)
+     * sp = ? (0 = two-byte / 1 = one-byte synchronization pattern)
      * al = 0 (fifo fill start condition: on synchron pattern reception)
-     * ff = 0 (fifo fill will be enabled after synchron pattern reception)
+     * ff = 0 (fifo fill disabled)
      * dr = 0 (sentensive reset mode)
      */
+#if RADIO_SYNC_LEN == 2
+    radio_write(0xCA80);
+#else
     radio_write(0xCA88);
+#endif
 }
 static void radio_set_data_filter()
 {
@@ -525,9 +582,9 @@ static void radio_set_data_filter()
      * al = 1 (clock recovery in auto mode)
      * ml = 0 (manual clock recovery setting; meaningless)
      * s = 0 (digital data filter)
-     * f2:0 = 100 (dqd threshold; default)
+     * f2:0 = 111 (dqd threshold; max)
      */
-    radio_write(0xC2AC);
+    radio_write(0xC2AF);
 }
 
 static void radio_set_power_and_deviation(uint8_t power, uint8_t deviation) {
@@ -542,20 +599,9 @@ static void radio_set_deviation(uint8_t deviation) {
     radio_set_power_and_deviation(radio_power, deviation);
 }
 
-static inline bool radio_get_irq() {
-    return !(PIND & _BV(2));
-}
-static inline bool radio_get_vdi() {
-    return !!(PINB & _BV(2));
-}
-static inline void radio_irq_wait() __attribute__((always_inline));
-static inline void radio_irq_wait() {
-    do
-        wdt_reset();
-    while(!radio_get_irq());
-}
+/* ------- start-up sequence -------  */
 
-static void radio_init()
+static void radio_reset()
 {
     /* nRST: in-pullup -> in-highz -> out-low */
     PORTB &=~ _BV(1);
@@ -569,6 +615,10 @@ static void radio_init()
     DDRB &=~ _BV(1);
     PORTB |= _BV(1);
 
+    /* wait while radio completes reset */
+    while(! (PINB & _BV(1)) )
+        wdt_reset();
+    
     /* read out power-on-reset status */
     radio_irq_wait();
     radio_begin();
@@ -579,47 +629,48 @@ static void radio_init()
     if(status_high != _BV(RADIO_POR))
         panic();
 
-    radio_set_frequency(RADIO_DEFAULT_FREQUENCY);
-    radio_set_bitrate(RADIO_DEFAULT_BITRATE);
-    radio_set_power_and_deviation(RADIO_DEFAULT_POWER, RADIO_DEFAULT_DEVIATION);
-    radio_set_rx_knobs(RADIO_DEFAULT_RX_KNOBS);
-    radio_set_data_filter();
-    radio_disable_rxfifo();
-    radio_mode_rx();
-
-    /* wait while radio completes reset */
-    while(! (PINB & _BV(1)) )
-        wdt_reset();
+    radio_rx_state.state = radio_rx_not_started;
 }
 
-/* ------------------------------------------------------------------------- */
-
-static bool op_rx_one()
+static bool radio_is_started() {
+    return radio_cfg == RADIO_CFG_OK;
+}
+static void radio_start(uint8_t cfg)
 {
-    static bool last_vdi;
-    static bool got_data;
+    if(radio_is_started())
+        return;
 
-    wdt_reset();
+    radio_cfg |= cfg;
+    if(radio_cfg == RADIO_CFG_OK - 1)
+    {
+        radio_set_data_filter();
+        radio_disable_rxfifo();
+        radio_mode_rx();
 
-    if(!radio_get_vdi()) {
-        if(last_vdi) {
-            ; // ...
-            radio_disable_rxfifo();
-            last_vdi = false;
-        }
-        return false;
-    } else {
-        if(!last_vdi) {
-            ; // ...
-            radio_enable_rxfifo();
-            last_vdi = true;
-            got_data = false;
-        }
+        radio_cfg = RADIO_CFG_OK;
+        radio_rx_state.state = radio_rx_vdi_wait;
     }
+}
 
-    if(!radio_get_irq())
-        return false;
+/* ------- rx state machine -------  */
 
+static void radio_rx_abort()
+{
+    if(radio_rx_state.state == radio_rx_not_started ||
+       radio_rx_state.state == radio_rx_vdi_wait ||
+       radio_rx_state.state == radio_rx_aborted)
+        return;
+
+    radio_disable_rxfifo();
+
+    radio_rx_state.state =
+        radio_rx_state.state == radio_rx_on_air
+            ? radio_rx_aborted
+            : radio_rx_vdi_wait;
+}
+
+static uint8_t radio_do_rx()
+{
     radio_begin();
     uint8_t status_high = radio_io(0);
     uint8_t byte = 0;
@@ -630,54 +681,131 @@ static bool op_rx_one()
     radio_end();
 
     if(!(status_high & _BV(RADIO_FFIT)))
-        return false;
+        panic();
 
-    if(!got_data)
-    {
-        got_data = true;
+    return byte;
+}
 
-        struct timing timing = get_now();
-        usart_buf_put(ESCAPE_BYTE);
-        usart_buf_put(TIMING_TAG_TOKEN);
-        usart_buf_put(timing.low);
-        usart_buf_put(timing.low >> 8);
-        usart_buf_put(timing.high);
-        usart_buf_put(timing.high >> 8);
-        usart_buf_put(timing.high >> 16);
-        usart_buf_put(timing.high >> 24);
-        
-        /* TODO: measure rssi 
-        usart_buf_put(ESCAPE_BYTE);
-        usart_buf_put(POWER_TAG_TOKEN);
-        usart_buf_put(irq.rssi);
-        */
+static uint16_t radio_rx_not_started() {
+    return RADIO_RX_IDLE;
+}
+static uint16_t radio_rx_vdi_wait()
+{
+    if(!radio_get_vdi())
+        return RADIO_RX_IDLE;
+
+    radio_enable_rxfifo();
+    radio_rx_state.deadline = TCNT1 + radio_byte_timing;
+    radio_rx_state.rounds =
+        (2 + RADIO_SYNC_LEN + 1) /* preamble, sync and the data byte we're waiting for  */
+        + 1; /* error margin */
+    radio_rx_state.state = radio_rx_data_wait;
+    return RADIO_RX_IDLE;
+}
+static uint16_t radio_rx_data_wait()
+{
+    if(!radio_get_vdi()) {
+        radio_rx_abort();
+        return RADIO_RX_IDLE;
     }
+    if(radio_get_irq()) {
+        radio_rx_state.state = radio_rx_on_air;
+        return RADIO_RX_FIRST | radio_do_rx();
+    }
+    if((int16_t)(radio_rx_state.deadline - TCNT1) < 0)
+    {
+        if(--radio_rx_state.rounds > 0)
+            radio_rx_state.deadline += radio_byte_timing;
+        else
+            radio_rx_abort();
+        return RADIO_RX_IDLE;
+    }
+    return RADIO_RX_IDLE;
+}
+static uint16_t radio_rx_on_air()
+{
+    if(!radio_get_vdi()) {
+        radio_rx_abort();
+        return RADIO_RX_LOOP;
+    }
+    if(!radio_get_irq())
+        return RADIO_RX_IDLE;
+    return RADIO_RX_DATA | radio_do_rx();
+}
+static uint16_t radio_rx_aborted() {
+    radio_rx_state.state = radio_rx_vdi_wait;
+    return RADIO_RX_END;
+}
 
+static inline uint16_t radio_rx() {
+    wdt_reset();
+    return radio_rx_state.state();
+}
+
+/* ------------------------------------------------------------------------- */
+
+static void op_rx_frame_start()
+{
+    struct timing timing = get_now();
+    uint8_t rssi = 42; /* TODO: measure this actually */
+
+    usart_buf_put(ESCAPE_BYTE);
+    usart_buf_put(FRAME_START_TOKEN);
+    usart_buf_put(timing.b[0]);
+    usart_buf_put(timing.b[1]);
+    usart_buf_put(timing.b[2]);
+    usart_buf_put(timing.b[3]);
+    usart_buf_put(timing.b[4]);
+    usart_buf_put(timing.b[5]);
+    usart_buf_put(rssi);
+}
+static void op_rx_data(uint8_t byte)
+{
     if(byte != ESCAPE_BYTE)
         usart_buf_put(byte);
     else {
         usart_buf_put(ESCAPE_BYTE);
         usart_buf_put(UNESCAPE_TOKEN);
     }
-    
-    usart_transmit();
-
-    return true;
 }
-
-static void op_rx() {
-    while(op_rx_one());
+static void op_rx_frame_end()
+{
+    usart_buf_put(ESCAPE_BYTE);
+    usart_buf_put(FRAME_END_TOKEN);
+}
+static void op_do_rx(uint16_t rx) __attribute__((noinline));
+static void op_do_rx(uint16_t rx)
+{
+    if(rx & RADIO_RX_FIRST)
+        op_rx_frame_start();
+    if(rx & (RADIO_RX_FIRST | RADIO_RX_DATA))
+        op_rx_data(rx & 0xFF);
+    if(rx & RADIO_RX_END)
+        op_rx_frame_end();
+    usart_transmit();
+}
+static void op_rx()
+{
+    uint16_t rx;
+    while((rx = radio_rx()) != RADIO_RX_IDLE)
+        op_do_rx(rx);
 }
 
 static void op_tx(volatile uint8_t *end)
 {
+    if(!radio_is_started())
+        panic();
+
     if(data_buf_empty(end))
         return;
+
+    radio_rx_abort();
+    op_rx();
 
     radio_mode_tx();
     radio_irq_wait();
 
-#if 0
+#if RADIO_SYNC_LEN == 2
     /* first 0xAA was sent, second 0xAA is being sent;
      * queue up the first sync byte
      * 0xB8 == tx register write command */
@@ -713,15 +841,10 @@ static void op_tx(volatile uint8_t *end)
 
 static void op_timing(const struct timing *tptr)
 {
-    struct timing t = {
-        .low = tptr->low,
-        .high = tptr->high
-    };
-
     for(;;)
     {
         struct timing now = get_now();
-        if(timing_geq(&now, &t))
+        if(timing_geq(&now, tptr))
             break;
         op_rx();
     }
@@ -748,10 +871,8 @@ static uint16_t read_uniq_id()
     return low | high << 8;
 }
 
-static void op_init()
+static void op_hello()
 {
-    radio_init();
-
     uint8_t version_high = 1,
             version_low = 0;
     uint16_t uniq_id = read_uniq_id();
@@ -794,7 +915,7 @@ static inline void led_on(uint8_t led) { PORTC &=~ led; }
 static inline void led_off(uint8_t led) { PORTC |= led; }
 static inline void led_toggle(uint8_t led) { PORTC ^= led; }
 
-static inline void panic()
+static inline void panic_inline()
 {
     cli();
 
@@ -802,7 +923,11 @@ static inline void panic()
     led_on(LED_RED);
     for(;;) wdt_reset();
 }
-static inline void reset()
+static void panic() {
+    panic_inline();
+}
+
+static void reset()
 {
     cli();
 
@@ -870,7 +995,8 @@ int main(void)
 
     led_on(LED_GREEN);
 
-    op_init();
+    radio_reset();
+    op_hello();
 
     for(;;)
     {
@@ -881,25 +1007,31 @@ int main(void)
 
         switch(cmd_buf_gettoken())
         {
-            case RX_KNOBS_TOKEN: {
-                struct rx_knobs_token token;
+            case SET_RX_KNOBS_TOKEN: {
+                struct set_rx_knobs_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_frequency(token.frequency);
                 radio_set_deviation(token.deviation);
                 radio_set_rx_knobs(token.rx_knobs);
+                radio_start(RADIO_CFG_RX_KNOBS);
+                radio_rx_abort();
                 break; }
-            case POWER_TAG_TOKEN: {
-                struct power_tag_token token;
+            case SET_POWER_TOKEN: {
+                struct set_power_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_power(token.power);
+                radio_start(RADIO_CFG_POWER);
+                radio_rx_abort();
                 break; }
-            case BITRATE_TAG_TOKEN: {
-                struct bitrate_tag_token token;
+            case SET_BITRATE_TOKEN: {
+                struct set_bitrate_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_bitrate(token.bitrate);
+                radio_start(RADIO_CFG_BITRATE);
+                radio_rx_abort();
                 break; }
-            case TIMING_TAG_TOKEN: {
-                struct timing_tag_token token;
+            case TIMING_TOKEN: {
+                struct timing_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 op_timing(&token.timing);
                 break; }
