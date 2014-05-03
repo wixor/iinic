@@ -126,9 +126,9 @@ struct tx_token {
 };
 struct frame_start_token {
     struct timing timing;
-    uint8_t rssi;
 };
 struct frame_end_token {
+    uint16_t rssi;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -137,6 +137,14 @@ struct frame_end_token {
  * read by main and INT0_vect,
  * but only via asm code */
 static volatile uint32_t timing_high; 
+
+/* written by INT0_vect
+ * read by main
+ */
+static volatile struct {
+    struct timing timing;
+    uint8_t flag;
+} radio_irq;
 
 ISR(TIMER1_OVF_vect, ISR_NAKED) 
 {
@@ -172,6 +180,63 @@ ISR(TIMER1_OVF_vect, ISR_NAKED)
         "pop r24\n\t"
         "out __SREG__, r24\n\t"
         "pop r24\n\t"
+        "reti"
+    );
+}
+
+ISR(INT0_vect, ISR_NAKED)
+{
+    asm volatile(
+        "push r24\n\t"
+        "push r25\n\t"
+
+        "in   r24, 0x2c\n\t" // TCNT1L
+        "in   r25, 0x38\n\t" // TIFR
+        "sbrc r25, 2\n\t" // TOV1
+        "in   r24, 0x2c\n\t" // TCNT1L
+        "sts  radio_irq+0, r24\n\t"
+        "in   r24, 0x2d\n\t" // TCNT1H
+        "sts  radio_irq+1, r24\n\t"
+
+        "in   r24, __SREG__\n\t"
+
+        "sbrc r25, 2\n\t" // TOV1
+        "jmp  1f\n\t"
+
+        "lds  r25, timing_high+0\n\t"
+        "sts  radio_irq+2, r25\n\t"
+        "lds  r25, timing_high+1\n\t"
+        "sts  radio_irq+3, r25\n\t"
+        "lds  r25, timing_high+2\n\t"
+        "sts  radio_irq+4, r25\n\t"
+        "lds  r25, timing_high+3\n\t"
+        "sts  radio_irq+5, r25\n\t"
+        "jmp  2f\n\t"
+
+    "1:  lds  r25, timing_high+0\n\t"
+        "subi r25, 0xff\n\t"
+        "sts  radio_irq+2, r25\n\t"
+        "lds  r25, timing_high+1\n\t"
+        "sbci r25, 0xff\n\t"
+        "sts  radio_irq+3, r25\n\t"
+        "lds  r25, timing_high+2\n\t"
+        "sbci r25, 0xff\n\t"
+        "sts  radio_irq+4, r25\n\t"
+        "lds  r25, timing_high+3\n\t"
+        "sbci r25, 0xff\n\t"
+        "sts  radio_irq+5, r25\n\t"
+
+    "2:  ldi  r25, 1\n\t"
+        "sts  radio_irq+6, r25\n\t"
+
+        "in   r25, 0x3b\n\t" // GICR
+        "cbr  r25, 6\n\t" // INT0
+        "out  0x3b, r25\n\t" // GICR
+
+        "out  __SREG__, r24\n\t"
+
+        "pop  r25\n\t"
+        "pop  r24\n\t"
         "reti"
     );
 }
@@ -443,13 +508,18 @@ static void radio_write(uint16_t v)
 static inline bool radio_get_irq() {
     return !(PIND & _BV(2));
 }
-static inline bool radio_get_vdi() {
-    return !!(PINB & _BV(2));
-}
 static inline void radio_irq_wait() {
     do
         wdt_reset();
     while(!radio_get_irq());
+}
+static inline void radio_async_irq() {
+    radio_irq.flag = false;
+    GICR |= _BV(INT0);
+}
+static inline void radio_sync_irq() {
+    GICR &=~ _BV(INT0);
+    radio_irq.flag = false;
 }
 
 /* ------- settings -------  */
@@ -504,9 +574,11 @@ static void radio_mode_rx()
     radio_write(0x82D9);
 
     radio_enable_rxfifo();
+    radio_async_irq();
 }
 static void radio_mode_tx()
 {
+    radio_sync_irq();
     radio_disable_rxfifo();
 
     /* 0x8000 == configuration setting command
@@ -666,8 +738,13 @@ static uint16_t radio_rx()
         return RADIO_RX_END;
     }
 
-    if(!radio_get_irq())
-        return RADIO_RX_IDLE;
+    if(radio_rx_state == RADIO_RX_STATE_IDLE) {
+        if(!radio_irq.flag)
+            return RADIO_RX_IDLE;
+    } else {
+        if(!radio_get_irq())
+            return RADIO_RX_IDLE;
+    }
 
     radio_begin();
 
@@ -686,9 +763,11 @@ static uint16_t radio_rx()
     if(radio_rx_state == RADIO_RX_STATE_IDLE)
     {
         if(!dqd || !crl) {
+            radio_async_irq();
             radio_reset_rxfifo();
             return RADIO_RX_IDLE;
         }
+        radio_sync_irq();
         radio_rx_state = RADIO_RX_STATE_DATA;
         return byte | RADIO_RX_FIRST;
     }
@@ -696,6 +775,7 @@ static uint16_t radio_rx()
     {
         if(!dqd || !crl) {
             radio_rx_state = RADIO_RX_STATE_IDLE;
+            radio_async_irq();
             radio_reset_rxfifo();
             return RADIO_RX_END;
         }
@@ -705,23 +785,27 @@ static uint16_t radio_rx()
 
 /* ------------------------------------------------------------------------- */
 
+static uint16_t op_rx_rssi;
+
 static void op_rx_frame_start()
 {
-    struct timing timing = get_now();
-    uint8_t rssi = 42; /* TODO: measure this actually */
-
     usart_buf_put(ESCAPE_BYTE);
     usart_buf_put(FRAME_START_TOKEN);
-    usart_buf_put(timing.b[0]);
-    usart_buf_put(timing.b[1]);
-    usart_buf_put(timing.b[2]);
-    usart_buf_put(timing.b[3]);
-    usart_buf_put(timing.b[4]);
-    usart_buf_put(timing.b[5]);
-    usart_buf_put(rssi);
+    usart_buf_put(radio_irq.timing.b[0]);
+    usart_buf_put(radio_irq.timing.b[1]);
+    usart_buf_put(radio_irq.timing.b[2]);
+    usart_buf_put(radio_irq.timing.b[3]);
+    usart_buf_put(radio_irq.timing.b[4]);
+    usart_buf_put(radio_irq.timing.b[5]);
+
+    op_rx_rssi = 0;
 }
 static void op_rx_data(uint8_t byte)
 {
+    uint16_t rssi = ADC;
+    if(rssi > op_rx_rssi)
+        op_rx_rssi = rssi;
+
     if(byte != ESCAPE_BYTE)
         usart_buf_put(byte);
     else {
@@ -733,6 +817,8 @@ static void op_rx_frame_end()
 {
     usart_buf_put(ESCAPE_BYTE);
     usart_buf_put(FRAME_END_TOKEN);
+    usart_buf_put(op_rx_rssi & 0xFF);
+    usart_buf_put(op_rx_rssi >> 8);
 }
 static void op_do_rx(uint16_t rx) __attribute__((noinline));
 static void op_do_rx(uint16_t rx)
@@ -934,8 +1020,15 @@ int main(void)
     SPCR = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
 
     /* timer 1: normal mode, F_CPU/8, interrupt on overflow */
-    TCCR1B = 0x02;
+    TCCR1B = _BV(CS11);
     TIMSK = _BV(TOIE1);
+
+    /* adc: internal 2.56V vref, free-running, 115.2kHz clock */
+    ADMUX = _BV(REFS1) | _BV(REFS0);
+    ADCSRA = _BV(ADEN) | _BV(ADSC) | _BV(ADATE) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
+
+    /* int0: low-level-triggered, not enabled yet */
+    MCUCR = 0;
 
     /* 65ms watchdog */
     WDTCR = _BV(WDE) | _BV(WDP1);
