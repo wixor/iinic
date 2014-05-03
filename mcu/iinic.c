@@ -379,7 +379,6 @@ ISR(USART_UDRE_vect, ISR_NAKED)
 #define RADIO_CRL  6 /* Clock recovery locked */
 #define RADIO_ATGL 5 /* AFC cycle */
 
-#define RADIO_SYNC_LEN 1
 #define RADIO_SYNC_BYTE1 0x2D
 #define RADIO_SYNC_BYTE2 0xD4
 
@@ -402,19 +401,12 @@ enum {
     RADIO_RX_FIRST = 0x0100,
     RADIO_RX_DATA  = 0x0200,
     RADIO_RX_END   = 0x0400,
-    RADIO_RX_LOOP  = 0x0800
 };
 
-static uint16_t radio_rx_not_started();
-static uint16_t radio_rx_vdi_wait();
-static uint16_t radio_rx_data_wait();
-static uint16_t radio_rx_on_air();
-static uint16_t radio_rx_aborted();
-
-static struct {
-    uint16_t (*state)();
-    uint16_t deadline;
-    uint8_t rounds;
+enum radio_rx_state {
+    RADIO_RX_STATE_IDLE,
+    RADIO_RX_STATE_DATA,
+    RADIO_RX_STATE_ABORTED
 } radio_rx_state;
 
 /* ------- raw i/o -------  */
@@ -462,6 +454,33 @@ static inline void radio_irq_wait() {
 
 /* ------- settings -------  */
 
+static void radio_enable_rxfifo()
+{
+    /* 0xCA00 = fifo and reset mode command
+     * f3:0 = 1000 (fifo interrupt threshold; 8 bits = 1 byte = default)
+     * sp = ? (0 = two-byte / 1 = one-byte synchronization pattern)
+     * al = 0 (fifo fill start condition: on synchron pattern reception)
+     * ff = 1 (fifo fill will be enabled after synchron pattern reception)
+     * dr = 0 (sentensive reset mode)
+     */
+    radio_write(0xCA82);
+}
+static void radio_disable_rxfifo()
+{
+    /* 0xCA00 = fifo and reset mode command
+     * f3:0 = 1000 (fifo interrupt threshold; 8 bits = 1 byte = default)
+     * sp = ? (0 = two-byte / 1 = one-byte synchronization pattern)
+     * al = 0 (fifo fill start condition: on synchron pattern reception)
+     * ff = 0 (fifo fill disabled)
+     * dr = 0 (sentensive reset mode)
+     */
+    radio_write(0xCA80);
+}
+static void radio_reset_rxfifo() {
+    radio_disable_rxfifo();
+    radio_enable_rxfifo();
+}
+
 static void radio_mode_rx()
 {
     /* 0x8000 == configuration setting command
@@ -483,9 +502,13 @@ static void radio_mode_rx()
      * dc  = 1 (clock output disabled)
      */
     radio_write(0x82D9);
+
+    radio_enable_rxfifo();
 }
 static void radio_mode_tx()
 {
+    radio_disable_rxfifo();
+
     /* 0x8000 == configuration setting command
      * el   = 1 (internal data register aka. tx buffer)
      * ef   = 0 (fifo mode aka. rx buffer)
@@ -546,36 +569,6 @@ static void radio_set_rx_knobs(uint8_t rx_knobs)
      */
     radio_write(0x9500 | rx_knobs);
 }
-static void radio_enable_rxfifo()
-{
-    /* 0xCA00 = fifo and reset mode command
-     * f3:0 = 1000 (fifo interrupt threshold; 8 bits = 1 byte = default)
-     * sp = ? (0 = two-byte / 1 = one-byte synchronization pattern)
-     * al = 0 (fifo fill start condition: on synchron pattern reception)
-     * ff = 1 (fifo fill will be enabled after synchron pattern reception)
-     * dr = 0 (sentensive reset mode)
-     */
-#if RADIO_SYNC_LEN == 2
-    radio_write(0xCA82);
-#else
-    radio_write(0xCA8A);
-#endif
-}
-static void radio_disable_rxfifo()
-{
-    /* 0xCA00 = fifo and reset mode command
-     * f3:0 = 1000 (fifo interrupt threshold; 8 bits = 1 byte = default)
-     * sp = ? (0 = two-byte / 1 = one-byte synchronization pattern)
-     * al = 0 (fifo fill start condition: on synchron pattern reception)
-     * ff = 0 (fifo fill disabled)
-     * dr = 0 (sentensive reset mode)
-     */
-#if RADIO_SYNC_LEN == 2
-    radio_write(0xCA80);
-#else
-    radio_write(0xCA88);
-#endif
-}
 static void radio_set_data_filter()
 {
     /* 0xC200 = data filter command
@@ -628,8 +621,6 @@ static void radio_reset()
 
     if(status_high != _BV(RADIO_POR))
         panic();
-
-    radio_rx_state.state = radio_rx_not_started;
 }
 
 static bool radio_is_started() {
@@ -644,102 +635,72 @@ static void radio_start(uint8_t cfg)
     if(radio_cfg == RADIO_CFG_OK - 1)
     {
         radio_set_data_filter();
-        radio_disable_rxfifo();
         radio_mode_rx();
 
         radio_cfg = RADIO_CFG_OK;
-        radio_rx_state.state = radio_rx_vdi_wait;
     }
 }
 
 /* ------- rx state machine -------  */
 
-static void radio_rx_abort()
+static bool radio_rx_abort()
 {
-    if(radio_rx_state.state == radio_rx_not_started ||
-       radio_rx_state.state == radio_rx_vdi_wait ||
-       radio_rx_state.state == radio_rx_aborted)
-        return;
-
-    radio_disable_rxfifo();
-
-    radio_rx_state.state =
-        radio_rx_state.state == radio_rx_on_air
-            ? radio_rx_aborted
-            : radio_rx_vdi_wait;
+    if(radio_rx_state != RADIO_RX_STATE_DATA)
+        return false;
+    radio_rx_state = RADIO_RX_STATE_ABORTED;
+    return true;
 }
 
-static uint8_t radio_do_rx()
+static void radio_rx_reset()
 {
-    radio_begin();
-    uint8_t status_high = radio_io(0);
-    uint8_t byte = 0;
-    if(status_high & _BV(RADIO_FFIT)) {
-        radio_io(0);
-        byte = radio_io(0);
-    }
-    radio_end();
-
-    if(!(status_high & _BV(RADIO_FFIT)))
-        panic();
-
-    return byte;
+    radio_rx_abort();
+    radio_reset_rxfifo();
 }
 
-static uint16_t radio_rx_not_started() {
-    return RADIO_RX_IDLE;
-}
-static uint16_t radio_rx_vdi_wait()
+static uint16_t radio_rx()
 {
-    if(!radio_get_vdi())
-        return RADIO_RX_IDLE;
+    wdt_reset();
 
-    radio_enable_rxfifo();
-    radio_rx_state.deadline = TCNT1 + radio_byte_timing;
-    radio_rx_state.rounds =
-        (2 + RADIO_SYNC_LEN + 1) /* preamble, sync and the data byte we're waiting for  */
-        + 1; /* error margin */
-    radio_rx_state.state = radio_rx_data_wait;
-    return RADIO_RX_IDLE;
-}
-static uint16_t radio_rx_data_wait()
-{
-    if(!radio_get_vdi()) {
-        radio_rx_abort();
-        return RADIO_RX_IDLE;
+    if(radio_rx_state == RADIO_RX_STATE_ABORTED) {
+        radio_rx_state = RADIO_RX_STATE_IDLE;
+        return RADIO_RX_END;
     }
-    if(radio_get_irq()) {
-        radio_rx_state.state = radio_rx_on_air;
-        return RADIO_RX_FIRST | radio_do_rx();
-    }
-    if((int16_t)(radio_rx_state.deadline - TCNT1) < 0)
-    {
-        if(--radio_rx_state.rounds > 0)
-            radio_rx_state.deadline += radio_byte_timing;
-        else
-            radio_rx_abort();
-        return RADIO_RX_IDLE;
-    }
-    return RADIO_RX_IDLE;
-}
-static uint16_t radio_rx_on_air()
-{
-    if(!radio_get_vdi()) {
-        radio_rx_abort();
-        return RADIO_RX_LOOP;
-    }
+
     if(!radio_get_irq())
         return RADIO_RX_IDLE;
-    return RADIO_RX_DATA | radio_do_rx();
-}
-static uint16_t radio_rx_aborted() {
-    radio_rx_state.state = radio_rx_vdi_wait;
-    return RADIO_RX_END;
-}
 
-static inline uint16_t radio_rx() {
-    wdt_reset();
-    return radio_rx_state.state();
+    radio_begin();
+
+    uint8_t status_high = radio_io(0);
+    if(!(status_high & _BV(RADIO_FFIT))) {
+        radio_end();
+        panic();
+    }
+    uint8_t status_low = radio_io(0);
+    uint8_t byte = radio_io(0);
+    radio_end();
+
+    bool dqd = 0 != (status_low & _BV(RADIO_DQD)),
+         crl = 0 != (status_low & _BV(RADIO_CRL));
+
+    if(radio_rx_state == RADIO_RX_STATE_IDLE)
+    {
+        if(!dqd || !crl) {
+            radio_reset_rxfifo();
+            return RADIO_RX_IDLE;
+        }
+        radio_rx_state = RADIO_RX_STATE_DATA;
+        return byte | RADIO_RX_FIRST;
+    }
+    else
+    {
+        if(!dqd || !crl) {
+            radio_rx_state = RADIO_RX_STATE_IDLE;
+            radio_reset_rxfifo();
+            return RADIO_RX_END;
+        }
+        return byte | RADIO_RX_DATA;
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -799,20 +760,18 @@ static void op_tx(volatile uint8_t *end)
     if(data_buf_empty(end))
         return;
 
-    radio_rx_abort();
-    op_rx();
+    if(radio_rx_abort())
+        op_do_rx(radio_rx());
 
     radio_mode_tx();
     radio_irq_wait();
 
-#if RADIO_SYNC_LEN == 2
     /* first 0xAA was sent, second 0xAA is being sent;
      * queue up the first sync byte
      * 0xB8 == tx register write command */
     radio_write(0xB800 | RADIO_SYNC_BYTE1);
     
     radio_irq_wait();
-#endif
 
     /* second 0xAA was sent, first sync byte is being sent;
      * queue up the second sync byte
@@ -1014,21 +973,21 @@ int main(void)
                 radio_set_deviation(token.deviation);
                 radio_set_rx_knobs(token.rx_knobs);
                 radio_start(RADIO_CFG_RX_KNOBS);
-                radio_rx_abort();
+                radio_rx_reset();
                 break; }
             case SET_POWER_TOKEN: {
                 struct set_power_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_power(token.power);
                 radio_start(RADIO_CFG_POWER);
-                radio_rx_abort();
+                radio_rx_reset();
                 break; }
             case SET_BITRATE_TOKEN: {
                 struct set_bitrate_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_bitrate(token.bitrate);
                 radio_start(RADIO_CFG_BITRATE);
-                radio_rx_abort();
+                radio_rx_reset();
                 break; }
             case TIMING_TOKEN: {
                 struct timing_token token;
