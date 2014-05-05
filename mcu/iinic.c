@@ -28,7 +28,7 @@ static volatile uint8_t data_buf[1536];
 static volatile uint8_t * data_wr = data_buf; /* owned by USART_RXC_vect */
 static volatile uint8_t * data_rd = data_buf; /* owned by main */
 
-static volatile uint8_t cmd_buf[128];
+static volatile uint8_t cmd_buf[256];
 static uint8_t cmd_rd; /* owned by main */
 static uint8_t cmd_wr; /* owned by USART_RXC_vect */
 static uint8_t cmd_rdcap;  /* written by USART_RXC_vect, read by main */
