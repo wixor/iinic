@@ -859,13 +859,13 @@ static void op_tx(volatile uint8_t *end)
     radio_irq_wait();
 
     /* second 0xAA was sent, first sync byte is being sent;
-     * queue up the second sync byte
-     * 0xB8 == tx register write command */
+     * queue up the second sync byte */
     radio_write(0xB800 | RADIO_SYNC_BYTE2);
 
+    uint8_t byte = 0;
     while(!data_buf_empty(end))
     {
-        uint8_t byte = data_buf_get();
+        byte = data_buf_get();
         radio_irq_wait();
         radio_write(0xB800 | byte);
     }
@@ -875,11 +875,22 @@ static void op_tx(volatile uint8_t *end)
 
     radio_irq_wait();
     
-    /* the ultimate byte is being sent,
-     * write some dummy byte to silence the interrupt */
-    radio_write(0xB800 | 0x00);
+    /* the ultimate byte is being sent, write a trailer byte;
+     * we choose it so that its msb is the inverse of the last byte's lsb;
+     * this creates 0->1 or 1->0 transition that helps keeping clock recovery
+     * locked in the receiver. */
+    radio_write(0xB800 | ((byte & 0x01) ? 0x55 : 0xAA));
 
     radio_irq_wait();
+
+    /* the trailer byte is being sent; we do not wait until this is completed;
+     * we kill its transmission in the middle instead, since we don't want
+     * the receiver to actually pick it up. it is there only to keep the
+     * signal strength and clock recovery up for the last byte of the data. */
+    uint16_t deadline = TCNT1 + radio_byte_timing/2;
+    while((int16_t)(deadline - TCNT1) > 0)
+        wdt_reset();
+
     radio_mode_rx();
 }
 
