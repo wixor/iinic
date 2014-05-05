@@ -634,7 +634,7 @@ static void radio_set_rx_knobs(uint8_t rx_knobs)
 {
     /* 0x9000 = reciever control command
      * p16  = 1 (pin 16 is vdi output)
-     * d1:0 = 01 (vdi in medium mode, ie. (rssi or dqd) and clock_locked)
+     * d1:0 = 00 (vdi in fast, vdi = dqd)
      * rx_knobs [2:0] = rssi threshold
      * rx_knobs [4:3] = lna gain
      * rx_knobs [7:5] = bandwidth
@@ -647,7 +647,7 @@ static void radio_set_data_filter()
      * al = 1 (clock recovery in auto mode)
      * ml = 0 (manual clock recovery setting; meaningless)
      * s = 0 (digital data filter)
-     * f2:0 = 111 (dqd threshold; max)
+     * f2:0 = 110 (dqd threshold = 6)
      */
     radio_write(0xC2AF);
 }
@@ -757,12 +757,11 @@ static uint16_t radio_rx()
     uint8_t byte = radio_io(0);
     radio_end();
 
-    bool dqd = 0 != (status_low & _BV(RADIO_DQD)),
-         crl = 0 != (status_low & _BV(RADIO_CRL));
+    bool dqd = 0 != (status_low & _BV(RADIO_DQD));
 
     if(radio_rx_state == RADIO_RX_STATE_IDLE)
     {
-        if(!dqd || !crl) {
+        if(!dqd) {
             radio_async_irq();
             radio_reset_rxfifo();
             return RADIO_RX_IDLE;
@@ -773,7 +772,7 @@ static uint16_t radio_rx()
     }
     else
     {
-        if(!dqd || !crl) {
+        if(!dqd) {
             radio_rx_state = RADIO_RX_STATE_IDLE;
             radio_async_irq();
             radio_reset_rxfifo();
