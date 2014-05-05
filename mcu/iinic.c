@@ -91,8 +91,7 @@ enum {
     TIMING_TOKEN = 0x05,
     PING_TOKEN = 0x06,
     TX_TOKEN = 0x07,
-    FRAME_START_TOKEN = 0x08,
-    FRAME_END_TOKEN = 0x09,
+    RX_TOKEN = 0x08,
 };
 
 struct reset_ack_token {
@@ -124,10 +123,8 @@ struct ping_token {
 struct tx_token {
     volatile uint8_t *ptr;
 };
-struct frame_start_token {
+struct rx_token {
     struct timing timing;
-};
-struct frame_end_token {
     uint16_t rssi;
 };
 
@@ -461,19 +458,6 @@ enum {
 };
 static uint8_t radio_cfg;
 
-enum {
-    RADIO_RX_IDLE  = 0x0000,
-    RADIO_RX_FIRST = 0x0100,
-    RADIO_RX_DATA  = 0x0200,
-    RADIO_RX_END   = 0x0400,
-};
-
-enum radio_rx_state {
-    RADIO_RX_STATE_IDLE,
-    RADIO_RX_STATE_DATA,
-    RADIO_RX_STATE_ABORTED
-} radio_rx_state;
-
 /* ------- raw i/o -------  */
 
 static inline void radio_begin() {
@@ -647,9 +631,9 @@ static void radio_set_data_filter()
      * al = 1 (clock recovery in auto mode)
      * ml = 0 (manual clock recovery setting; meaningless)
      * s = 0 (digital data filter)
-     * f2:0 = 110 (dqd threshold = 6)
+     * f2:0 = 100 (dqd threshold = 4)
      */
-    radio_write(0xC2AF);
+    radio_write(0xC2AC);
 }
 
 static void radio_set_power_and_deviation(uint8_t power, uint8_t deviation) {
@@ -713,37 +697,36 @@ static void radio_start(uint8_t cfg)
     }
 }
 
-/* ------- rx state machine -------  */
+/* ------------------------------------------------------------------------- */
 
-static bool radio_rx_abort()
+static bool op_rx_active;
+static uint16_t op_rx_rssi;
+
+static void op_rx_end()
 {
-    if(radio_rx_state != RADIO_RX_STATE_DATA)
-        return false;
-    radio_rx_state = RADIO_RX_STATE_ABORTED;
-    return true;
+    usart_buf_put(ESCAPE_BYTE);
+    usart_buf_put(RX_TOKEN);
+    usart_buf_put(radio_irq.timing.b[0]);
+    usart_buf_put(radio_irq.timing.b[1]);
+    usart_buf_put(radio_irq.timing.b[2]);
+    usart_buf_put(radio_irq.timing.b[3]);
+    usart_buf_put(radio_irq.timing.b[4]);
+    usart_buf_put(radio_irq.timing.b[5]);
+    usart_buf_put(op_rx_rssi & 0xFF);
+    usart_buf_put(op_rx_rssi >> 8);
+    usart_transmit();
 }
 
-static void radio_rx_reset()
-{
-    radio_rx_abort();
-    radio_reset_rxfifo();
-}
-
-static uint16_t radio_rx()
+static void op_rx()
 {
     wdt_reset();
 
-    if(radio_rx_state == RADIO_RX_STATE_ABORTED) {
-        radio_rx_state = RADIO_RX_STATE_IDLE;
-        return RADIO_RX_END;
-    }
-
-    if(radio_rx_state == RADIO_RX_STATE_IDLE) {
+    if(!op_rx_active) {
         if(!radio_irq.flag)
-            return RADIO_RX_IDLE;
+            return;
     } else {
         if(!radio_get_irq())
-            return RADIO_RX_IDLE;
+            return;
     }
 
     radio_begin();
@@ -759,51 +742,35 @@ static uint16_t radio_rx()
 
     bool dqd = 0 != (status_low & _BV(RADIO_DQD));
 
-    if(radio_rx_state == RADIO_RX_STATE_IDLE)
+    if(!op_rx_active)
     {
         if(!dqd) {
-            radio_async_irq();
             radio_reset_rxfifo();
-            return RADIO_RX_IDLE;
+            radio_async_irq();
+            return;
         }
+
         radio_sync_irq();
-        radio_rx_state = RADIO_RX_STATE_DATA;
-        return byte | RADIO_RX_FIRST;
+
+        op_rx_active = true;
+        op_rx_rssi = 0;
     }
     else
     {
-        if(!dqd) {
-            radio_rx_state = RADIO_RX_STATE_IDLE;
-            radio_async_irq();
+        if(!dqd)
+        {
+            op_rx_end();
+            op_rx_active = false;
+
             radio_reset_rxfifo();
-            return RADIO_RX_END;
+            radio_async_irq();
+            return;
         }
-        return byte | RADIO_RX_DATA;
+
+        uint16_t rssi = ADC;
+        if(rssi > op_rx_rssi)
+            op_rx_rssi = rssi;
     }
-}
-
-/* ------------------------------------------------------------------------- */
-
-static uint16_t op_rx_rssi;
-
-static void op_rx_frame_start()
-{
-    usart_buf_put(ESCAPE_BYTE);
-    usart_buf_put(FRAME_START_TOKEN);
-    usart_buf_put(radio_irq.timing.b[0]);
-    usart_buf_put(radio_irq.timing.b[1]);
-    usart_buf_put(radio_irq.timing.b[2]);
-    usart_buf_put(radio_irq.timing.b[3]);
-    usart_buf_put(radio_irq.timing.b[4]);
-    usart_buf_put(radio_irq.timing.b[5]);
-
-    op_rx_rssi = 0;
-}
-static void op_rx_data(uint8_t byte)
-{
-    uint16_t rssi = ADC;
-    if(rssi > op_rx_rssi)
-        op_rx_rssi = rssi;
 
     if(byte != ESCAPE_BYTE)
         usart_buf_put(byte);
@@ -811,31 +778,27 @@ static void op_rx_data(uint8_t byte)
         usart_buf_put(ESCAPE_BYTE);
         usart_buf_put(UNESCAPE_TOKEN);
     }
-}
-static void op_rx_frame_end()
-{
-    usart_buf_put(ESCAPE_BYTE);
-    usart_buf_put(FRAME_END_TOKEN);
-    usart_buf_put(op_rx_rssi & 0xFF);
-    usart_buf_put(op_rx_rssi >> 8);
-}
-static void op_do_rx(uint16_t rx) __attribute__((noinline));
-static void op_do_rx(uint16_t rx)
-{
-    if(rx & RADIO_RX_FIRST)
-        op_rx_frame_start();
-    if(rx & (RADIO_RX_FIRST | RADIO_RX_DATA))
-        op_rx_data(rx & 0xFF);
-    if(rx & RADIO_RX_END)
-        op_rx_frame_end();
     usart_transmit();
 }
-static void op_rx()
+
+static void op_rx_abort()
 {
-    uint16_t rx;
-    while((rx = radio_rx()) != RADIO_RX_IDLE)
-        op_do_rx(rx);
+    if(op_rx_active) {
+        op_rx_end();
+        op_rx_active = false;
+    }
 }
+static void op_rx_reset()
+{
+    radio_reset_rxfifo();
+    if(op_rx_active) {
+        op_rx_end();
+        op_rx_active = false;
+        radio_async_irq();
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 
 static void op_tx(volatile uint8_t *end)
 {
@@ -845,10 +808,10 @@ static void op_tx(volatile uint8_t *end)
     if(data_buf_empty(end))
         return;
 
-    if(radio_rx_abort())
-        op_do_rx(radio_rx());
-
     radio_mode_tx();
+
+    op_rx_abort();
+
     radio_irq_wait();
 
     /* first 0xAA was sent, second 0xAA is being sent;
@@ -893,6 +856,8 @@ static void op_tx(volatile uint8_t *end)
 
     radio_mode_rx();
 }
+
+/* ------------------------------------------------------------------------- */
 
 static void op_timing(const struct timing *tptr)
 {
@@ -1076,21 +1041,21 @@ int main(void)
                 radio_set_deviation(token.deviation);
                 radio_set_rx_knobs(token.rx_knobs);
                 radio_start(RADIO_CFG_RX_KNOBS);
-                radio_rx_reset();
+                op_rx_reset();
                 break; }
             case SET_POWER_TOKEN: {
                 struct set_power_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_power(token.power);
                 radio_start(RADIO_CFG_POWER);
-                radio_rx_reset();
+                op_rx_reset();
                 break; }
             case SET_BITRATE_TOKEN: {
                 struct set_bitrate_token token;
                 cmd_buf_eat(&token, sizeof(token));
                 radio_set_bitrate(token.bitrate);
                 radio_start(RADIO_CFG_BITRATE);
-                radio_rx_reset();
+                op_rx_reset();
                 break; }
             case TIMING_TOKEN: {
                 struct timing_token token;
