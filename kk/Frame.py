@@ -29,10 +29,10 @@ class Frame:
     def __init__(self):
         pass
 
-    def fromReceived(self, msg, firstTiming, powers):
+    def fromReceived(self, msg, firstTiming, power):
         self._bytes = msg
         self._timing = firstTiming
-        self._power = sum(powers)/len(powers) if powers and powers[0] else None
+        self._power = power
 
     def toSend(self, ftype, fromId, toId, payload):
         l = len(payload)
@@ -63,55 +63,26 @@ class Frame:
         return ord(self._bytes[0])
 
 class FrameLayer:
-    def __init__(self, nic, isDevice, myId = None):
+    def __init__(self, nic, myId = None):
         self.nic = nic
         self.myId = myId or self.nic.get_uniq_id()
-        self.buff = None
-        self.isDevice
 
     def getMyId(self):
         return self.myId
 
-    def _nextByte(self, deadline):
-        if self.buff:
-            x = self.buff
-            self.buff = None
-            assert x
-            return x
-        byte = self.nic.rx(deadline)
-        return byte
-
-    def _unnext(self, byte):
-        assert not self.buff
-        self.buff = byte
-
     def _receiveFrame(self, deadline = None): # deadline for first message
-        expectDiff = 1000000/self.nic._txbitrate*8 + Config.TIMING_VARIANCE
-        message = ''
-
-        first = self._nextByte(deadline)
-        if not first:
+        rxbytes = self.nic.rx(deadline)
+        if not rxbytes:
             return None
-        message += first.byte
-        powers = [first.power]
-
-        lastTime = first.timing
-        length = ord(first.byte) + Frame.lengthOverhead()
-        for i in xrange(length-1):
-            rxbyte = self._nextByte(time.time() + Config.INNER_DEADLINE)
-            if not rxbyte:
-                return None
-            if rxbyte.timing - lastTime > expectDiff:
-                # maybe it's a byte from the next frame? undo 'next'
-                self._unnext(rxbyte)
-                return None
-            lastTime = rxbyte.timing
-            message += rxbyte.byte
-            powers += [rxbyte.power]
-        frame = Frame()
-        frame.fromReceived(message, first.timing, powers)
+        
+        length = ord(rxbytes.bytes[0]) + Frame.lengthOverhead()
+        if len(rxbytes.bytes) < length:
+            return None
+        
+        frame.fromReceived(rxbytes.bytes[0:length], rxbytes.timing, rxbytes.rssi)
         if not frame.isValid():
             return None
+        
         return frame
 
     def receiveFrame(self, deadline = None):
