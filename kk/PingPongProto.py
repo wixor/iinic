@@ -6,8 +6,8 @@ class PingPongProto(Proto):
     INIT_RETRY = 2.0
     DROP_GAME = 4.0
     
-    def __init__(self, frameLayer):
-        Proto.__init__(self, frameLayer)
+    def __init__(self):
+        Proto.__init__(self)
         self.lastReceived = None
         
     def uponRegistration(self, dispatcher):

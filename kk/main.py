@@ -2,6 +2,7 @@
 
 import sys, time, struct
 
+from .. import iinic
 from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
@@ -12,8 +13,8 @@ def sampleCallback():
     print 'This is sample callback, now is', time.time()
 
 class SampleProto(Proto):
-    def __init__(self, frameLayer):
-        Proto.__init__(self, frameLayer)
+    def __init__(self):
+        Proto.__init__(self)
     
     def handleFrame(self, frame):
         print 'Sample proto handles a frame', frame
@@ -22,17 +23,18 @@ class SampleProto(Proto):
         print 'This is sample callback in sample proto, now is', time.time()
 
 def main(mode):
-    frameLayer = FrameLayer()
+    nic = iinic.NIC(iinic.NetComm())
+    frameLayer = FrameLayer(nic)
     frameLayer.nic.set_channel(23) # TODO: expose this method
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     
     if mode == 'd':
         dispatcher = Dispatcher(frameLayer)
         
-        sample = SampleProto(frameLayer)
+        sample = SampleProto()
         dispatcher.registerProto(sample, 'sample', 's')
         
-        pp = PingPongProto(frameLayer)
+        pp = PingPongProto()
         dispatcher.registerProto(pp, 'ping-pong', 'p')
         
         try:

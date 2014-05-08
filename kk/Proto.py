@@ -1,8 +1,8 @@
 from OurException import OurException
 
 class Proto:
-    def __init__(self, frameLayer):
-        self.frameLayer = frameLayer
+    def __init__(self):
+        self.frameLayer = None
         self.dispatcher = None
     
     # implement this
@@ -11,6 +11,7 @@ class Proto:
     
     def doRegistration(self, dispatcher):
         self.dispatcher = dispatcher
+        self.frameLayer = dispatcher.frameLayer
         self.uponRegistration(dispatcher)
         
     # implement this

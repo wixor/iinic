@@ -34,11 +34,11 @@ class Frame:
         self._timing = firstTiming
         self._power = sum(powers)/len(powers) if powers and powers[0] else None
 
-    def toSend(self, ftype, fromId, toId, data):
-        l = len(data)
+    def toSend(self, ftype, fromId, toId, payload):
+        l = len(payload)
         if l > 255:
-            raise OurException('Frame data too long, maximum is 255')
-        self._bytes = chr(l) + ftype + idToStr(fromId) + idToStr(toId) + data
+            raise OurException('Frame payload too long, maximum is 255')
+        self._bytes = chr(l) + ftype + idToStr(fromId) + idToStr(toId) + payload
         self._bytes += chr(computeCRC_8(self._bytes))
 
     def bytes(self):
@@ -63,10 +63,11 @@ class Frame:
         return ord(self._bytes[0])
 
 class FrameLayer:
-    def __init__(self, myId = None):
-        self.nic = iinic.NIC(iinic.NetComm())
+    def __init__(self, nic, isDevice, myId = None):
+        self.nic = nic
         self.myId = myId or self.nic.get_uniq_id()
         self.buff = None
+        self.isDevice
 
     def getMyId(self):
         return self.myId
