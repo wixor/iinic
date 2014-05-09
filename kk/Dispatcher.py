@@ -35,7 +35,7 @@ class Dispatcher:
         self.scheduleCallback(repeater, firstCall)
         
     def loop(self):
-        for (name, proto) in self.nameToProto:
+        for (name, proto) in self.nameToProto.items():
             proto.onStart()
 
         while True:

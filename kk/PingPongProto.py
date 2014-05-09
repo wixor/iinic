@@ -29,6 +29,7 @@ class PingPongProto(Proto):
         else:
             reply = 'Ping'
         reply += ' ' + str(1 + int(received[5:]))
+        print 'Got:', received, ' sent:', reply
         # reply immediately
         self.frameLayer.sendFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=frame.fromId(), content=reply, timing=frame.timing()+1000000)
         self.dispatcher.scheduleCallback(self.initPing, time.time()+self.DROP_GAME+0.1)

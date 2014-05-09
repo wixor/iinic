@@ -78,7 +78,8 @@ class FrameLayer:
         length = ord(rxbytes.bytes[0]) + Frame.lengthOverhead()
         if len(rxbytes.bytes) < length:
             return None
-        
+       
+        frame = Frame()
         frame.fromReceived(rxbytes.bytes[0:length], rxbytes.timing, rxbytes.rssi)
         if not frame.isValid():
             return None

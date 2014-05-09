@@ -26,9 +26,11 @@ class SampleProto(Proto):
         pass
 
 def main(mode):
-    nic = iinic.NIC(iinic.NetComm())
+    comm = iinic.USBComm()
+    nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
-    frameLayer.nic.set_channel(23) # TODO: expose this method
+    # frameLayer.nic.set_channel(23) # TODO: expose this method
+    myid = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     
     if mode == 'd':
@@ -57,9 +59,9 @@ def main(mode):
                 print 'Timing:', frame.timing(), frame
 
     if mode == 's':
-        frameLayer.sendFrame('s', myId, 0, 'blah')
+        frameLayer.sendFrame('s', myid, 0, 'blah')
         approx = frameLayer.nic.get_approx_timing() # TODO: expose this method
-        frameLayer.sendFrame('x', myId, 0, 'blah blah', approx + 2000000)
+        frameLayer.sendFrame('x', myid, 0, 'blah blah', approx + 2000000)
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
