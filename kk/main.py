@@ -21,6 +21,9 @@ class SampleProto(Proto):
         
     def sampleCallback(self):
         print 'This is sample callback in sample proto, now is', time.time()
+        
+    def onStart(self):
+        pass
 
 def main(mode):
     nic = iinic.NIC(iinic.NetComm())

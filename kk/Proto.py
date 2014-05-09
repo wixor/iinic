@@ -12,8 +12,7 @@ class Proto:
     def doRegistration(self, dispatcher):
         self.dispatcher = dispatcher
         self.frameLayer = dispatcher.frameLayer
-        self.uponRegistration(dispatcher)
         
     # implement this
-    def uponRegistration(self, dispatcher):
+    def onStart(self):
         pass
