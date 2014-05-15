@@ -12,7 +12,7 @@ class PingPongProto(Proto):
         
     def onStart(self):
         self.dispatcher.scheduleCallback(self.initPing, time.time()+self.INIT_RETRY+0.1) # listen for some time
-
+    
     def initPing(self):
         if not self.lastReceived or time.time()-self.lastReceived > self.DROP_GAME:
             self.frameLayer.sendFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=0, content='Ping 1')
@@ -29,7 +29,6 @@ class PingPongProto(Proto):
         else:
             reply = 'Ping'
         reply += ' ' + str(1 + int(received[5:]))
-        print 'Got:', received, ' sent:', reply
         # reply immediately
         self.frameLayer.sendFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=frame.fromId(), content=reply, timing=frame.timing()+1000000)
         self.dispatcher.scheduleCallback(self.initPing, time.time()+self.DROP_GAME+0.1)
