@@ -32,7 +32,7 @@ class Frame:
     def fromReceived(self, msg, firstTiming, power):
         self._bytes = msg
         self._timing = firstTiming
-        if power and power.__class__ == [].__class__:
+        if power and power.__class__ == [].__class__ and power[0] is not None:
             self._power = sum(power)/len(power)
         else:
             self.power = power
