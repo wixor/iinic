@@ -29,10 +29,13 @@ class Frame:
     def __init__(self):
         pass
 
-    def fromReceived(self, msg, firstTiming, powers):
+    def fromReceived(self, msg, firstTiming, power):
         self._bytes = msg
         self._timing = firstTiming
-        self._power = sum(powers)/len(powers) if powers and powers[0] else None
+        if power and power.__class__ == [].__class__:
+            self._power = sum(power)/len(power)
+        else:
+            self.power = power
 
     def toSend(self, ftype, fromId, toId, payload):
         l = len(payload)
@@ -63,11 +66,10 @@ class Frame:
         return ord(self._bytes[0])
 
 class FrameLayer:
-    def __init__(self, nic, isDevice, myId = None):
+    def __init__(self, nic, myId = None):
         self.nic = nic
         self.myId = myId or self.nic.get_uniq_id()
         self.buff = None
-        self.isDevice
 
     def getMyId(self):
         return self.myId
@@ -85,7 +87,7 @@ class FrameLayer:
         assert not self.buff
         self.buff = byte
 
-    def _receiveFrame(self, deadline = None): # deadline for first message
+    def _receiveFrame_OLD(self, deadline = None): # deadline for first message
         expectDiff = 1000000/self.nic._txbitrate*8 + Config.TIMING_VARIANCE
         message = ''
 
@@ -114,9 +116,26 @@ class FrameLayer:
             return None
         return frame
 
+    def _receiveFrame_NEW(self, deadline = None): # deadline for first message
+        rxbytes = self.nic.rx(deadline)
+        if not rxbytes:
+            return None
+        
+        length = ord(rxbytes.bytes[0]) + Frame.lengthOverhead()
+        if len(rxbytes.bytes) < length:
+            return None
+       
+        frame = Frame()
+        frame.fromReceived(rxbytes.bytes[0:length], rxbytes.timing, rxbytes.rssi)
+        if not frame.isValid():
+            return None
+        
+        return frame
+
     def receiveFrame(self, deadline = None):
+        recv = self._receiveFrame_OLD if Config.CURRENT_VERSION == Config.API_VERSION.OLD else self._receiveFrame_NEW
         while not deadline or time.time() < deadline:
-            frame = self._receiveFrame(deadline)
+            frame = recv(deadline)
             if frame:
                 return frame
         return None

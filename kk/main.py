@@ -21,11 +21,15 @@ class SampleProto(Proto):
         
     def sampleCallback(self):
         print 'This is sample callback in sample proto, now is', time.time()
+        
+    def onStart(self):
+        pass
 
 def main(mode):
-    nic = iinic.NIC(iinic.NetComm())
+    comm = iinic.USBComm() if Config.ON_DEVICE else iinic.NetComm()
+    nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
-    frameLayer.nic.set_channel(23) # TODO: expose this method
+    myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     
     if mode == 'd':

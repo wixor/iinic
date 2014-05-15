@@ -59,7 +59,7 @@ Opis funkcji:
         
 - scheduleRepeatingCallback(callback, firstCall, interval)
     Tak jak wyżej, ale callback będzie wykonywany w nieskończoność, poczynając od firstCall z odstępami interval.
-    
+
 - loop()
     Funkcja odpowiadająca za pętlę główną programu.
     
@@ -72,8 +72,8 @@ Opis metod:
 - doRegistration(dispatcher)
     Funkcja wywoływana przez dispatchera przy rejestracji. Nie wywoływać tej funkcji manualnie!
 
-- uponRegistration(dispatcher)
-    Funkcja "wirtualna" do zaimplementowania w klasie pochodnej. Wywołwana przez dispatchera przy rejestracji.
+- onStart(dispatcher)
+    Funkcja "wirtualna" do zaimplementowania w klasie pochodnej. Wywołwana przez dispatchera tuż przed startem głównej pętli.
     
 +++ PingPongProto.py +++
 Przykładowy protokół dla dwóch urządzeń. Po włączeniu, nasłuchujemy przez chwilę. Jeżeli odebraliśmy cokolwiek, uznajemy, że było to Ping X lub Pong X, gdzie X jest liczbą i odpowiadamy Pong X+1 lub Ping X+1 po sekundzie i tak w kółko. Jeżeli nie, uznajemy, że jesteśmy stroną inicjującą i co 2 sekundy wysyłamy "Ping 1" w eter. Po szczegóły polecam wczytać się w kod.

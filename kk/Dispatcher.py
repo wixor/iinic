@@ -35,6 +35,9 @@ class Dispatcher:
         self.scheduleCallback(repeater, firstCall)
         
     def loop(self):
+        for (name, proto) in self.nameToProto.items():
+            proto.onStart()
+
         while True:
             (callback, timing) = min(self.callbacks, key=lambda (c,t): t) if self.callbacks else (None, time.time()+10.)
             if timing <= time.time():
