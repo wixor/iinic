@@ -73,7 +73,7 @@ class routing_cache(object):
 
 	def direct_get(self, n_addr):
 		if n_addr in self.cache:
-			return self.cache[n_addr]
+			return self.cache[n_addr][0]
 		return None
 
 	def get(self, n_addr):
@@ -82,9 +82,12 @@ class routing_cache(object):
 		self.assert_sizes
 		self.direct_get(n_addr)
 
-	def add(self, n_addr, dl_addr):
+	def add(self, n_addr, dl_addr, time = 0):
+		if n_addr in self.cache:
+			if self.cache[n_addr][1] > time:
+				return
 		self.assert_sizes()
 		self.dir_add(n_addr)
 		self.assert_sizes()
-		self.cache[n_addr] = dl_addr
+		self.cache[n_addr] = (dl_addr, time)
 

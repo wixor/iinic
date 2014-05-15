@@ -56,6 +56,23 @@ class tst_routing_cache(unittest.TestCase):
 		self.assertEqual(c.direct_get(0), None)
 		self.assertEqual(c.direct_get(tst_routing_cache.count * 2 - 1), tst_routing_cache.count * 2 - 1)
 
+	def test_time(self):
+		c = routing_cache()
+		for i in range(5, routing_cache.size / 2 + 5):
+			c.add(i, i)
+		c.add(1, 1, 5);
+		self.assertEqual(c.direct_get(1), 1)
+		c.add(1, 2, 7);
+		self.assertEqual(c.direct_get(1), 2)
+		c.add(1, 3, 6);
+		self.assertEqual(c.direct_get(1), 2)
+		c.add(1, 4, 8);
+		self.assertEqual(c.direct_get(1), 4)
+		c.add(1, 5, 4);
+		self.assertEqual(c.direct_get(1), 4)
+		for i in range(6, routing_cache.size / 2 + 5):
+			self.assertEqual(c.direct_get(i), i)
+
 	# ...
 
 if __name__ == "__main__":
