@@ -1,13 +1,13 @@
 #!/usr/bin/python
-import math, collections, heapq, logging, time, socket, select, errno
+import math, random, collections, heapq, logging, time, socket, select, errno
 
 from iinic import extract_token, \
     PlainByteToken, \
-    UnescapeToken, ResetRqToken, ResetAckToken, ChannelTagToken, \
-    PowerTagToken, BitrateTagToken, TimingTagToken, \
-    PingToken, TxToken
+    UnescapeToken, ResetRqToken, ResetAckToken, \
+    SetRxKnobsToken, SetPowerToken, SetBitrateToken, \
+    TimingToken, PingToken, TxToken, RxToken \
 
-TxByte = collections.namedtuple('TxByte', ('client', 'byte', 'channel', 'power', 'bitrate'))
+TxBytes = collections.namedtuple('TxBytes', ('client', 'bytes', 'frequency', 'bitrate', 'duration'))
 MyTxToken = collections.namedtuple('MyTxToken', ('buf'))
 
 ### ----------------------------------------------------------------------- ###
@@ -35,24 +35,25 @@ class Client(object):
         self.server = server
         self.peer = '%s:%d' % socket.getpeername()
         self.connected = True
+        self.uniq_id = random.randint(1,65534)
         self.resetState()
         logging.info('peer %s is connected', self.peer)
 
+    @staticmethod
+    def time2timing(x):
+        return int(math.ceil(x * 1843200.))
+    @staticmethod
+    def timing2time(x):
+        return 0.00000054253472*x
+
     def resetState(self):
-        self.channel = 1
-        self.power = 10
-        self.bitrate = 300
+        self.frequency = None
+        self.power = None
+        self.bitrate = None
         self.treset = self.server.time
-        self.tlasttiming = 0
-        self.broadcastbytes = 0
         self.rxbuf = ''
         self.cmdqueue = []
         self.txqueue = ''
-        self.txremaining = ''
-
-    @property
-    def timing(self):
-        return int(math.ceil(1.e6 * (self.server.time - self.treset)))
 
     def fileno(self):
         return self.socket.fileno()
@@ -83,9 +84,9 @@ class Client(object):
                 break
             self.rxbuf = self.rxbuf[e.LENGTH:]
             if isinstance(e, PlainByteToken):
-                self.queueTxByte(e.byte)
+                self.txqueue += e.byte
             elif isinstance(e, UnescapeToken):
-                self.queueTxByte(e.ESCAPE)
+                self.txqueue += e.ESCAPE
             elif isinstance(e, TxToken):
                 self.cmdqueue.append(MyTxToken(self.txqueue))
                 self.txqueue = ''
@@ -104,22 +105,19 @@ class Client(object):
             logging.error('exception while sending to peer %s: %r', self.peer, err)
             self.disconnected()
 
-    def queueTxByte(self, b):
-        self.txqueue += b
-
     def runCommand(self):
         if 0 == len(self.cmdqueue):
             return
         e = self.cmdqueue[0]
         if isinstance(e, ResetRqToken):
             self.resetCommand(e)
-        elif isinstance(e, ChannelTagToken):
-            self.setChannelCommand(e)
-        elif isinstance(e, PowerTagToken):
+        elif isinstance(e, SetRxKnobsToken):
+            self.setRxKnobsCommand(e)
+        elif isinstance(e, SetPowerToken):
             self.setPowerCommand(e)
-        elif isinstance(e, BitrateTagToken):
+        elif isinstance(e, SetBitrateToken):
             self.setBitrateCommand(e)
-        elif isinstance(e, TimingTagToken):
+        elif isinstance(e, TimingToken):
             self.timingCommand(e)
         elif isinstance(e, PingToken):
             self.pingCommand(e)
@@ -131,122 +129,165 @@ class Client(object):
         self.runCommand()
 
     def resetCommand(self, e):
+        logging.info('peer %s :: reset', self.peer)
         self.resetState()
         
-        timing = self.timing
-        self.send(ResetAckToken(
-            channel = self.channel,
-            power = self.power,
-            bitrate = self.bitrate,
-            timing_lo = timing & (1<<32)-1,
-            timing_hi = timing >> 32
-        ).serialize())
+        def ack():
+            self.send(ResetAckToken(
+                version_high = 1,
+                version_low = 0,
+                uniq_id = self.uniq_id
+            ).serialize())
+            self.nextCommand()
 
-        self.nextCommand()
+        self.server.queue(self.server.time + 0.5, ack)
 
-    def setChannelCommand(self, e):
-        if not (0 <= e.channel < 32):
-            logging.warning('peer %s tries to use invalid channel %d', self.peer, e.channel)
+    def setRxKnobsCommand(self, e):
+        erssi = e.rx_knobs & 7
+        if   erssi == 0: rssi = -103
+        elif erssi == 1: rssi = -97
+        elif erssi == 2: rssi = -91
+        elif erssi == 3: rssi = -85
+        elif erssi == 4: rssi = -79
+        elif erssi == 5: rssi = -73
         else:
-            self.channel = e.channel
-            self.send(e.serialize())
+            logging.info('peer %s sent invalid rx_knobs (0x%02X)', self.peer, e.rx_knobs)
+
+        egain = (e.rx_knobs >> 3) & 3
+        if   egain == 0: gain = 0
+        elif egain == 1: gain = -6
+        elif egain == 2: gain = -14
+        elif egain == 3: gain = -20
+
+        ebw = (e.rx_knobs >> 5) & 7
+        if   ebw == 1: bw = 400
+        elif ebw == 2: bw = 340
+        elif ebw == 3: bw = 270
+        elif ebw == 4: bw = 200
+        elif ebw == 5: bw = 134
+        elif ebw == 6: bw = 67
+        else:
+            logging.info('peer %s sent invalid rx_knobs (0x%02X)', self.peer, e.rx_knobs)
+
+        logging.info('peer %s :: setRxKnobs (freq %.3fMHz, deviation %dkHz, bandwidth %dkHz, rssi %ddB, gain %ddB)',
+            self.peer, 20. * (43. + e.frequency / 4000), 15*(1+e.deviation), bw, rssi, gain)
+        self.frequency = e.frequency
         self.nextCommand()
 
     def setPowerCommand(self, e):
+        logging.info('peer %s :: setPower (%.1fdB)', self.peer, -2.5*e.power)
         self.power = e.power
         self.nextCommand()
 
     def setBitrateCommand(self, e):
-        if not (300 <= e.bitrate <= 115200):
-            logging.warning('peer %s tries to set invalid bitrate %d', self.peer, e.bitrate)
-        else:
-            self.bitrate = e.bitrate
-            self.send(e.serialize())
+        bitrate = 10000000. / 29. / (8. if 0 != (e.bitrate & 0x80) else 1.) / (1. + (e.bitrate & 0x7F))
+        logging.info('peer %s :: setBitrate (%.3f)', self.peer, bitrate)
+        self.bitrate = bitrate
         self.nextCommand()
 
     def timingCommand(self, e):
-        timing = self.timing
-        etiming = (e.timing_hi << 32) | e.timing_lo
+        t = self.timing2time((e.timing_hi << 16) | e.timing_lo)
+        logging.info('peer %s :: timing (%.6f)', self.peer, t)
+        t += self.treset
 
-        if etiming <= timing:
+        if t <= self.server.time:
+            logging.info('peer %s timing in the past', self.peer)
             self.nextCommand()
-            return
-
-        if etiming - timing > 30000000:
-            logging.warning('peer %s tries to use very large delay: %d', self.peer, (etiming - timing))
-            self.nextCommand()
-            return
-
-        t = self.server.time + 1e-6 * (etiming - timing)
-        self.server.queue(t, self.nextCommand)
+        else:
+            self.server.queue(t, self.nextCommand)
     
     def pingCommand(self, e):
+        logging.info('peer %s :: ping (%d)', self.peer, e.seq)
         self.send(e.serialize())
         self.nextCommand()
 
     def txCommand(self, e):
-        self.txremaining = e.buf
-        self.txNext()
+        logging.info('peer %s :: tx (%d bytes)', self.peer, len(e.buf))
 
-    def txNext(self):
-        if 0 == len(self.txremaining):
-            self.nextCommand()
+        if self.frequency is None or \
+           self.power is None or \
+           self.bitrate is None:
+            logging.warning('peer %s attemped tx on unconfigured radio!', self.peer)
+            self.disconnected()
             return
-        b = self.txremaining[0]
-        self.txremaining = self.txremaining[1:]
-        self.server.tx(TxByte(
+
+        self.server.tx(TxBytes(
             client = self,
-            byte = b,
-            channel = self.channel,
-            power = self.power,
-            bitrate = self.bitrate
-        ), self.txNext)
+            bytes = e.buf,
+            frequency = self.frequency,
+            bitrate = self.bitrate,
+            duration = (len(e.buf)+4) * 8. / self.bitrate
+        ), self.nextCommand)
 
     def broadcast(self, tx):
-        if tx.client is self or tx.channel != self.channel or tx.bitrate != self.bitrate:
+        if tx.client is self or \
+           tx.frequency != self.frequency or \
+           tx.bitrate != self.bitrate:
+            return
+        if self.frequency is None or \
+           self.power is None or \
+           self.bitrate is None:
             return
 
-        self.broadcastbytes += 1
-        expectedtime = self.tlasttiming + self.broadcastbytes * 8. / self.bitrate
-        if abs(expectedtime - self.server.time) >= 6. / self.bitrate:
-            self.broadcastbytes = 0
-            self.tlasttiming = self.server.time
-            timing = self.timing
-            self.send(TimingTagToken(
-                timing_lo = timing & (1<<32)-1,
-                timing_hi = timing >> 32
-            ).serialize())
+        timing = self.server.time - tx.duration + 5.*8./tx.bitrate - self.treset
+        if timing <= 0:
+            return
+        timing = self.time2timing(timing)
 
-        if tx.byte == UnescapeToken.ESCAPE:
-            self.send(UnescapeToken().serialize())
-        else:
-            self.send(tx.byte)
+        logging.info('peer %s :: rx (%d bytes)', self.peer, len(tx.bytes))
+
+        self.send(tx.bytes.replace(UnescapeToken.ESCAPE, UnescapeToken().serialize()))
+        self.send(RxToken(
+            timing_lo = timing & 0xFFFF,
+            timing_hi = timing >> 16,
+            rssi = 0
+        ).serialize())
 
 ### ----------------------------------------------------------------------- ###
 
-class Channel(object):
-    def __init__(self, nr, server):
-        self.nr = nr
+class LargePacketCollider(object):
+    def __init__(self, frequency, server):
+        self.frequency = frequency
         self.server = server
         self.currtx = None
         self.txend = 0 
 
     def tx(self, tx, cb):
-        txend = self.server.time + 8./tx.bitrate
+        txend = self.server.time + tx.duration
         self.currtx = tx if self.txend <= self.server.time else None
         self.txend = max(self.txend, txend)
         def onend():
             if self.currtx is tx:
                 self.currtx = None
                 self.server.broadcast(tx)
+            else:
+                logging.info('tx of %d bytes from peer %s collided', len(tx.bytes), tx.client.peer)
             cb()
         self.server.queue(txend, onend)
 
 ### ----------------------------------------------------------------------- ###
 
+class TimestampingFilter(logging.Filter):
+    def __init__(self, server):
+        super(TimestampingFilter, self).__init__()
+        self.server = server
+    def filter(self, record):
+        record.servertime = self.server.time
+        return super(TimestampingFilter, self).filter(record)
+
 class Server(object):
     def __init__(self, host, port):
-        self.channels = [Channel(i, self) for i in xrange(32)]
+
+        logging.basicConfig(
+            format = '%(servertime)f %(message)s',
+            level = logging.INFO
+        )
+
+        self.time = time.time()
+        logging.getLogger().addFilter(TimestampingFilter(self))
+
+        logging.info("starting up...")
+        self.colliders = dict()
         self.listener = Listener(host, port, self)
         self.clients = []
         self.heap = []
@@ -271,12 +312,18 @@ class Server(object):
         heapq.heappush(self.heap, (t,cb))
 
     def tx(self, tx, cb):
-        self.channels[tx.channel].tx(tx, cb)
+        if tx.frequency not in self.colliders:
+            self.colliders[tx.frequency] = LargePacketCollider(tx.frequency, self)
+        self.colliders[tx.frequency].tx(tx, cb)
     def broadcast(self, tx):
+        logging.info('broadcasting transmission from peer %s (%d bytes)',
+            tx.client.peer, len(tx.bytes))
         for c in self.clients:
             c.broadcast(tx)
 
     def loop(self):
+        logging.info("entering main loop...")
+
         evts = []
         while True:
             now = time.time()
@@ -293,10 +340,5 @@ class Server(object):
             evts = self.poll.poll(timeout)
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        format = '%(asctime)s %(message)s',
-        datefmt = '%Y-%m-%d %H:%M:%S',
-        level = logging.INFO
-    )
     Server('0.0.0.0', 2048).loop()
 

@@ -13,13 +13,12 @@ class Dispatcher:
     def registerProto(self, proto, name, frameTypes):
         if name in self.nameToProto:
             raise OurException('This protocol name has been already taken')
-        for t in frameTypes:
-            if t in self.typeToProto:
-                raise OurException('This protocol type has been already taken')
+        
         # proto is valid
         for t in frameTypes:
             self.typeToProto[t] = proto
         self.nameToProto[name] = proto
+        
         proto.doRegistration(self)
 
     def getProtoByName(self, name):

@@ -16,6 +16,9 @@ def main():
     # zadziała samo z prawdziwym urządzeniem.
     nic = iinic.NIC(iinic.NetComm())
 
+    # Zmień prędkość transmisji z domyślnej na 600 bitów na sekundę
+    nic.set_bitrate(nic.BITRATE_600)
+
     # Tutaj określamy wiadomość, jaką będziemy wysyłali oraz co jaki czas
     # chcemy ją wysyłać. Czas jest określony w mikrosekundach i będzie pilnowany
     # przez timer na karcie sieciowej (co się za chwilę okaże).
@@ -26,10 +29,10 @@ def main():
     for i in itertools.count(1):
         # "poczekaj, aż twój zegarek będzie pokazywał wartość delay * i"
         nic.timing(delay * i)
-        # "wyślij wiadomość msg".
-        nic.tx(msg)
-        # "zatrzymaj mój program aż kolejka poleceń karty opróźni się".
-        nic.sync()
+        # "wyślij wiadomość msg"
+        # oraz
+        # "zatrzymaj mój program dopóki wiadomość nie zostanie wysłana"
+        nic.tx(msg).await()
 
         # Chciałbym tutaj zwrócić uwagę na to, jak możnaby niepoprawnie
         # napisać powyższy fragment kodu. Gdyby zamienić kolejnością
