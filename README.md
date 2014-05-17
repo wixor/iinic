@@ -228,21 +228,26 @@ Metody API
   `iinic.NIC.BITRATE_*`. Można też podawać inne wartości; w takim przypadku
   muszą one być z zakresu od 0 do 255. Jeżeli najstarszy bit podanej wartości
   jest ustawiony, prawdziwy bitrate oblicza się ze wzoru
-  10e+6 / 29 / 8 / (bitrate+1) [bps]; jeżeli najstarszy bit jest wyczyszczony,
-  prawdziwy bitrate oblicza się ze wzoru  10e+6 / 29 / (bitrate+1) [bps].
-  Należy pamiętać, że obsługa transmisji wychodzących wymaga pewnej mocy
-  obliczeniowej od karty sieciowej. Ustawienie zbyt wysokiego bitrate'u może
-  spowodować przeciążenie karty, co prawdopodobnie spowoduje przejście w stan
-  paniki. Ta metoda nie oczekuje na faktyczne dokonanie zmiany bitrate'u!
+  10e+6 / 29 / 8 / ((bitrate & 0x7F) +1) [bps]; jeżeli najstarszy bit jest
+  wyczyszczony, prawdziwy bitrate oblicza się ze wzoru
+  10e+6 / 29 / (bitrate+1) [bps]. Należy pamiętać, że obsługa transmisji
+  przychodzących wymaga pewnej mocy obliczeniowej od karty sieciowej.
+  Ustawienie zbyt wysokiego bitrate'u może spowodować przeciążenie karty,
+  co prawdopodobnie spowoduje przejście w stan paniki. Domyślny bitrate jest
+  dostępny jako stała `iinic.NIC.defaultBitrate`. Ta metoda nie oczekuje na
+  faktyczne dokonanie zmiany!
 * `set_sensitivity(gain, rssi)`:  
   Ta metoda wysyła do karty polecenie zmiany wzmocnienia sygnału odbieranego
   (`gain`) oraz progu czułości (`rssi`). Wartość progu czułości nie jest w tej
   chwili wykorzystywana. Wartość wzmocnienia musi być jedną ze stałych
-  `iinic.NIC.GAIN_*`. Ta metoda nie oczekuje na faktyczne dokonanie zmiany!
+  `iinic.NIC.GAIN_*`. Domyślne parametry są dostępne jako stałe
+  `iinic.NIC.defaultGain` oraz `iinic.NIC.defaultRSSI`. Ta metoda nie oczekuje
+  na faktyczne dokonanie zmiany!
 * `set_power(power)`:  
   Ta metoda wysyła do karty polecenie zmiany mocy nadawania na `power`.
   Podana wartość musi być jedną ze stałych `iinic.NIC.POWER_*`. Zostanie ona
-  użyta przy następnym nadawaniu.
+  użyta przy następnym nadawaniu. Domyślna wartość jest dostępna jako stała
+  `iinic.NIC.defaultPower`.
 * `tx(payload, overrun_fail=True, deadline=None)`:  
   Ta metoda wysyła do karty polecenie nadania wiadomości `payload`. Należy
   pamiętać, że proces nadawania trwa nietrywialną ilość czasu. Domyślnie
