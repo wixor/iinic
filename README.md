@@ -29,34 +29,80 @@ zakomunikować owe błędy programowi. Chyba nie tak: "hej, polecenie które
 wydałeś karcie czterdzieści dwie instrukcje temu, właśnie próbowało się wykonać
 i zgadnij, co się okazało? było błędne! deal with it".
 
-Limity karty sieciowej, które symulujemy, są następujące:
+Szczegółowy opis warstwy fizycznej znajdziecie w pliku `phys.md`. Najważniejsze
+parametry karty sieciowej są następujące:
 
-* kanał: 0 ... 31,
-* bitrate: pomiędzy 300 a 115200 bitów na sekundę,
-* długość bufora nadawania: 768 bajtów,
-* moc nadawania: bez znaczenia,
-* maksymalny czas oczekiwania w metodzie `timing()`: 30 sekund.
+* procesor: 8-bitowy AVR mega32 taktowany 14.7456 MHz, 2 kB pamięci RAM,
+* interfejs USB: port szeregowy 230400 bps w trybie 8n1 bez kontroli przepływu,
+* długość bufora nadawania: 1536 bajtów,
+* długość bufora poleceń: 256 bajtów,
+* długość bufora dla PC: 128 bajtów,
+* rozdzielczość timera: około 0.5 us
+* modulacja radiowa: FSK,
+* częstotliwość środkowa modulacji: od 860.48 MHz do 879.515 MHz co 5 kHz,
+* dewiacja: od 15 kHz do 240 kHz
+* szerokość pasma odbieranego: od 67 kHz do 400 kHz
+* bitrate: od 600 do 57600 bitów na sekundę,
+* moc nadawania: od 0.09 mW do 5 mW (od -10.5 dBm do 7 dBm) z anteną,
+* czułość: rzędu 0.01 pikowata (-110 dBm).
 
-Nie oznacza to, że prawdziwe urządzenie będzie miało takie same limity.
-W szczególności radzę nie zbliżać się do limitu długości bufora nadawania;
-ramki kilkunasto -- kilkudziesięciobajtowe powinny w zupełności wystarczyć.
-Należy też zauważyć, że rozmiar bufora nadawania nie jest ograniczeniem na
-jedną ramkę, ale na wszystkie dane zakolejkowane do wysłania: sto wywołań
-funkcji `tx()` z dziesięciobajtowymi ramkami bez oczekiwania na zakończenie
-wysyłania danych powoduje próbę zakolejkowania tysiąca bajtów w buforze!
+Po podłączeniu do prądu karta będzie migała zieloną lampką. Podczas
+inicjalizacji obiekt `NIC` nawiązuje połączenie z kartą, co sygnalizowane jest
+stałym zapaleniem się zielonej lampki. W obliczu stresująych sytuacji karta
+odmówi współpracy i przejdzie w stan paniki. Jes to sygnalizowane ciągłym
+zapaleniem się lampki czerwonej. Aby udobruchać kartę należy ją odłączyć oraz
+ponownie podłączyć do komputera. Prosimy nie dawać karcie czekoladek; są dla
+niej bardzo niezdrowe. Hipotetycznie może też zdarzyć się zawieszenie się
+karty sieciowej; taka sytuacja oznacza błąd w oprogramowaniu karty i będzie
+sygnalizowana miganiem lampki czerwonej.
 
-Domyślne ustawienia symulowanej karty sieciowej:
+Najprostszym sposobem na zdenerwowanie karty jest spowodowanie przepełnienie
+bufora. Bufor danych nadawania jest całkiem spory i przepełnienie go nie
+spowoduje awarii karty; stare dane nadpiszą nowe i dane zakolejkowane do
+wysłania pójdą w świat jako bełkot. Kod API stara się uchronić programistę
+przed takimi sytuacjami śledząc ilość danych znajdującą się w tym buforze.
+Wszystkie dane, które mają zostać wysłane z karty do komputera, przechodzą
+przez bufor dla PC. Przepełnienie tego bufora wydaje się trudne, jednak
+z pewnością nie niemożliwe. W szczególności wykonywanie bardzo wielu poleceń,
+które powodują odpowiedź karty (np. `ping()`) połączone z odbieraniem szybkiej
+transmisji danych (np. z prędnością 57600 bps lub większą) może spowodować
+przekręcenie się tego bufora. W takiej sytuacji karta zacznie wysyłać bełkot
+do PC, co prawdopodobnie spowoduje jakąś awarię w waszym programie.
+Zdecydowanie najbardziej wrażliwym na przepełnienie jest bufor poleceń.
+Przepełnienie go spowoduje z wielkim prawdopodobieństwem przejście w stan
+paniki. W szczególności poniższy kod psuje kartę sieciową:
+```python
+while True:
+    nic.tx('a')
+```
+Ta pętla powoduje nieustanne wysyłanie do karty poleceń nadania jednego
+bajtu danych. Takie polecenie zajmuje jeden bajt w buforze danych do wysłania
+oraz aż pięć bajtów w buforze poleceń. Zatem bufor poleceń przepełni się dużo
+szybciej niż bufor danych do wysłania; zabezpieczenie przed przepełnieniem
+tego drugiego nie zdąży zadziałać i karta spanikuje. Hardware przewiduje
+możliwość wprowadzenia kontroli przepływu na linii komputer-karta; dzięki temu
+karta mogłaby wstrzymać strumień danych płynący od komputera do czasu, gdy w
+buforach zrobi się miejsce. Na dzień dzisiejszy funkcja ta nie jest jednak
+zaimplementowana w oprogramowaniu karty.
 
-* kanał = 1,
-* bitrate = 300 bitów na sekundę
-* moc = 10
+Domyślne ustawienia karty sieciowej są następujące:
 
-Bitrate celowo jest mały, żeby wyraźnie (na oko) było widać efekty związane z
-kolejkami, opóźnieniami i kolizjami; oczywiście docelowo chcielibyśmy pracować
-z nieco wyższymi prędkościami. Ustawienie mocy nie ma żadnego znaczenia. Karta
-sieciowa (ani prawdziwa ani symulowana) nie będzie pamiętała waszych ustawień,
-więc jeżeli chcecie je zmienić, musicie wysłać odpowiednie komendy przy każdym
-uruchomieniu programu.
+* kanał: 868.32 MHz, dewiacja 60 kHz, pasmo odbierane 67 kHz
+* bitrate: 9600 bitów na sekundę
+* moc nadawania: minimalna
+* czułość: minimalna
+
+Częstotliwość środkowa kanału znajduje się mniej-więcej w środku pasma
+obsługiwanego przez radio i jest domyślną wartością podaną w dokumentacji
+radia. Pozostałe parametry zostały dobrane tak, aby wyeksponować możliwie wiele
+radiowych efektów transmisji. Pasmo obierane jest zostało ustawione na
+najmniejsze z możliwych; dewiacja została ustawiona na największą mieszczącą
+się w paśmie. Wybrana prędkość transmisji pozwala na dość efektywną, ale
+nie bezbłędną, transmisję. Manipulacja jedynie prędkością transmisji umożliwia
+uzyskiwanie kanałów bardzo wiernych (minimalna prędkość transmisji) lub ledwie
+działających (maksymalna prędkość transmisji). Karta sieciowa nie pamięta
+waszych ustawień, więc jeżeli chcecie je zmienić, musicie wysłać odpowiednie
+komendy przy każdym uruchomieniu programu.
 
 Osoby, które znają gita i chciałyby coś napisać w tym projekcie, zachęcam do
 korzystania z niniejszego repo; dajcie znać, a dodam wam dostępy. Jeżeli w
@@ -69,7 +115,7 @@ pakietami innych uczestników zabawy ;)
 Czas
 ----
 
-Zanim omówimy metody obiektu NIC, kilka słów o czasie. W API występują dwa
+Zanim omówimy metody obiektu `NIC`, kilka słów o czasie. W API występują dwa
 rodzaje czasu: jeden odnosi się do czasu komputera, zaś drugi do zegarka na
 karcie sieciowej. Oba czasy są bezwzględne. Czas komputera jest doublem i jest
 mierzony jako unixowy timestamp, czyli liczbę sekund, które minęły od początku
@@ -128,15 +174,15 @@ Metody API
 
 * `get_uniq_id()`:  
   Ta metoda zwraca unikalny identyfikator karty sieciowej. Identyfikator
-  ten jest liczbą całkowitą z zakresu 0x0001 do 0xFFFE, czyli dwubajtową
+  ten jest liczbą całkowitą z zakresu 0x0001 do 0xFFFE, czyli dwubajtową
   liczbą bez znaku, która nie jest ciągiem samych zer ani samych jedynek.
   Na symulatorze, z racji braku fizycznego urządzenia, identyfikator ten
-  jest losowany przy każdym uruchomieniu programu; może to prowadzić do
+  jest losowany przy każdym połączeniu z serwerem; może to prowadzić do
   kolizji.
 * `get_approx_timing()`:  
-  Ta metoda zwraca przybliżoną aktualną wartość zegarka na karcie sieciowej.
+  Ta metoda zwraca przybliżoną aktualną wartość zegarka na karcie sieciowej.
   Nie ma żadnych gwarancji ani oszacowań na jakość tego przybliżenia.
-  Błąd może być dowolnie wielki, jednak mamy nadzieję, że będzie mieścił
+  Błąd może być dowolnie wielki, jednak mamy nadzieję, że będzie mieścił
   się w zakresie kilkudziesięciu milisekund.
 * `ping()`:  
   Ta metoda wysyła "pinga" do karty sieciowej. Karta odpowiada nia niego
@@ -152,7 +198,7 @@ Metody API
   z nieprzewidywalnego miejsca w kodzie. W szczególności może ona zostać
   wywołana z kodu obsługi transmisji lub z innego kodu, który manipuluje
   stanem karty sieciowej. W związku z tym, funkcja ta absolutnie nie może
-  wykonywać żadnych operacji na obiekcie `NIC`; należy również zachować
+  wykonywać żadnych operacji na obiekcie `NIC`; należy również zachować
   najwyższą ostrożność używając tej funkcji do manipulacji stanem programu.
 * `sync(deadline = None)`:  
   Ta metoda synchronizuje komputer z kartą sieciową przy użyciu pinga:
@@ -164,39 +210,72 @@ Metody API
   wewnętrzny zegar przekroczy wartość `timing`. Ta metoda nie wstrzymuje
   działania programu!
 * `set_channel(channel)`:  
-  Ta metoda wysya do karty polecenie zmiany kanału na `channel`. Ta metoda nie
-  oczekuje na faktyczne dokonanie zmiany!
+  Ta metoda wysya do karty polecenie zmiany kanału na `channel`. Kanał jest
+  opisany przez obiekt `iinic.Channel`. Konstruktor tego obiektu przyjmuje
+  argumenty `freq`, `dev` oraz `bw`. Częstotliwość (`freq`) podawana jest jako
+  liczba całkowita, która zostanie przeliczona na prawdziwą częstotliwość
+  według wzoru 20 * (43 + freq / 4000) [MHz]. Minimalną wartością jest 96,
+  natomiast maksymalną 3909. Dewiacja (`dev`) jest podawana jako liczba
+  całkowita, która zostanie przeliczona na prawdziwą dewiację według wzoru
+  (1 + dev) * 15 kHz. Minimalną wartością jest 0, natomiast maksymalną 15.
+  Szerokość pasma odbieranego (`bw`) jest jedną ze stałych
+  `iinic.Channel.BW_*`. Domyślny kanał (czyli ten, który jest ustawiany po
+  resecie urządzenia) jest dostępny jako stała `iinic.NIC.defaultChannel`.
+  Ta metoda nie oczekuje na faktyczne dokonanie zmiany kanału!
 * `set_bitrate(bitrate)`:  
-  Ta metoda wysyła do karty polecenie zmiany szybkości nadawania oraz odbierania
-  na `bitrate`. Ta metoda nie oczekuje na faktyczne dokonanie zmiany!
+  Ta metoda wysyła do karty polecenie zmiany szybkości nadawania oraz
+  odbierania na `bitrate`. Wartość `bitrate` powinna być jedną ze stałych
+  `iinic.NIC.BITRATE_*`. Można też podawać inne wartości; w takim przypadku
+  muszą one być z zakresu od 0 do 255. Jeżeli najstarszy bit podanej wartości
+  jest ustawiony, prawdziwy bitrate oblicza się ze wzoru
+  10e+6 / 29 / 8 / ((bitrate & 0x7F) +1) [bps]; jeżeli najstarszy bit jest
+  wyczyszczony, prawdziwy bitrate oblicza się ze wzoru
+  10e+6 / 29 / (bitrate+1) [bps]. Należy pamiętać, że obsługa transmisji
+  przychodzących wymaga pewnej mocy obliczeniowej od karty sieciowej.
+  Ustawienie zbyt wysokiego bitrate'u może spowodować przeciążenie karty,
+  co prawdopodobnie spowoduje przejście w stan paniki. Domyślny bitrate jest
+  dostępny jako stała `iinic.NIC.defaultBitrate`. Ta metoda nie oczekuje na
+  faktyczne dokonanie zmiany!
+* `set_sensitivity(gain, rssi)`:  
+  Ta metoda wysyła do karty polecenie zmiany wzmocnienia sygnału odbieranego
+  (`gain`) oraz progu czułości (`rssi`). Wartość progu czułości nie jest w tej
+  chwili wykorzystywana. Wartość wzmocnienia musi być jedną ze stałych
+  `iinic.NIC.GAIN_*`. Domyślne parametry są dostępne jako stałe
+  `iinic.NIC.defaultGain` oraz `iinic.NIC.defaultRSSI`. Ta metoda nie oczekuje
+  na faktyczne dokonanie zmiany!
 * `set_power(power)`:  
   Ta metoda wysyła do karty polecenie zmiany mocy nadawania na `power`.
-  Nie wiadomo jeszcze, jaka jest semantyka tej wartości. Podana tutaj wartość
-  zostanie użyta przy następnym nadawaniu.
+  Podana wartość musi być jedną ze stałych `iinic.NIC.POWER_*`. Zostanie ona
+  użyta przy następnym nadawaniu. Domyślna wartość jest dostępna jako stała
+  `iinic.NIC.defaultPower`.
 * `tx(payload, overrun_fail=True, deadline=None)`:  
   Ta metoda wysyła do karty polecenie nadania wiadomości `payload`. Należy
-  pamiętać, że proces nadawania trwa nietrywialną ilość czasu. Domyślnie program
-  na komputerze nie jest blokowany na czas nadawania, natomiast dopóki nadawanie
-  nie zakończy się, karta nie będzie przetwarzała poleceń. Bufor nadawczy karty
-  ma ograniczoną pojemność; w związku z tym nie możemy zakolejkować wielkiej
-  ilości danych do wysłania. Obiekt `NIC` przy użyciu pingów śledzi ilość danych,
-  które znajdują się w kolejce karty. Jeżeli okaże się, że zakolejkowanie danej
-  wiadomości spowodowałoby przekroczenie rozmiaru bufora, metoda tx() zgłosi
-  wyjątek. Na potrzeby debuggowania oraz implementacji bardzo prostych protokołów
-  udostępniona jest opcja `overrun_fail`. Ustawienie jej na wartość `False`
-  spowoduje, że metoda tx() będzie oczekiwała na to, aż w buforze karty zrobi się
-  wystarczająco dużo miejsca na zakolejkowanie danego pakietu. Oczekiwanie to jest
-  ograniczone czasem `deadline`. Dokładny czas takiego oczekiwania jest jednak
-  trudny do ustalenia. Metoda tx() zwraca obiekt `PingFuture`; karta wyśle
+  pamiętać, że proces nadawania trwa nietrywialną ilość czasu. Domyślnie
+  program na komputerze nie jest blokowany na czas nadawania, natomiast dopóki
+  nadawanie nie zakończy się, karta nie będzie przetwarzała poleceń. Bufor
+  nadawczy karty ma ograniczoną pojemność; w związku z tym nie możemy
+  zakolejkować wielkiej ilości danych do wysłania. Obiekt `NIC` przy użyciu
+  pingów śledzi ilość danych, które znajdują się w kolejce karty. Jeżeli okaże
+  się, że zakolejkowanie danej wiadomości spowodowałoby przekroczenie rozmiaru
+  bufora, metoda `tx()` zgłosi wyjątek. Na potrzeby debuggowania oraz
+  implementacji bardzo prostych protokołów udostępniona jest opcja
+  `overrun_fail`. Ustawienie jej na wartość `False` spowoduje, że metoda `tx()`
+  będzie oczekiwała na to, aż w buforze karty zrobi się wystarczająco dużo
+  miejsca na zakolejkowanie danego pakietu. Oczekiwanie to jest ograniczone
+  czasem `deadline`. Dokładny czas takiego oczekiwania jest jednak trudny do
+  ustalenia. Metoda `tx()` zwraca obiekt `PingFuture`; karta wyśle
   potwierdzenie tego pinga w momencie, gdy zakończy nadawanie wiadomości.
+  W szczególności wysłanie danych wraz z zablokowaniem programu do momentu
+  zakończenia wysyłania można uzyskać przy użyciu idiomu
+  `nic.tx(payload).await()`.
 * `rx(deadline = None)`:  
-  Ta metoda odbiera z karty jeden bajt danych. Argument `deadline` jest opisany
-  powyżej; jeżeli żaden bajt nie zostanie odebrany przed upływem deadline-u,
-  funkcja ta zwraca `None`. Każdy odebrany bajt jest reprezentowany przez
-  obiekt `RxByte`, który zawiera pola `byte`, `bitrate`, `channel`, `power`
-  oraz `timing`. Należy zauważyć, że odebrany bajt może pochodzić z przeszłości:
-  na przykład podczas, gdy oczekiwaliśmy na synchronizację z kartą sieciową przy
-  użyciu metody sync(), karta mogła odbierać dane; metoda rx() zwróci je zanim
+  Ta metoda odbiera z karty jedną paczkę danych. Argument `deadline` jest
+  opisany powyżej; jeżeli żadna paczka nie zostanie w całości odebrana przed
+  upływem deadline-u, funkcja ta zwraca `None`. Odebrane dane są reprezentowane
+  przez obiekt `RxBytes`, który zawiera pola `bytes`, `rssi` oraz `timing`.
+  Należy zauważyć, że odebrany bajt może pochodzić z przeszłości: na przykład
+  podczas, gdy oczekiwaliśmy na synchronizację z kartą sieciową przy użyciu
+  metody `sync()`, karta mogła odbierać dane; metoda `rx()` zwróci je zanim
   przystąpi do pobierania danych aktualnie transmitowanych na łączu. Krótko
-  mówiąc, metoda rx() zwraca kolejne bajty, które usłyszała karta sieciowa nawet,
-  jeżeli nasz program przez jakiś czas "nie uważał".
+  mówiąc, metoda `rx()` zwraca kolejne paczki, które usłyszała karta sieciowa
+  nawet, jeżeli nasz program przez jakiś czas "nie uważał".
