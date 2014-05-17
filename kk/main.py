@@ -26,9 +26,10 @@ class SampleProto(Proto):
         pass
 
 def main(mode):
-    nic = iinic.NIC(iinic.NetComm())
+    comm = iinic.USBComm() if Config.ON_DEVICE else iinic.NetComm()
+    nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
-    frameLayer.nic.set_channel(23) # TODO: expose this method
+    myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     
     if mode == 'd':
