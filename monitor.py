@@ -4,6 +4,7 @@ import iinic
 
 def main():
     nic = iinic.NIC(iinic.NetComm())
+    nic.set_bitrate(nic.BITRATE_600)
 
     while True:
         print nic.rx()

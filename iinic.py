@@ -454,11 +454,11 @@ class USBComm(object):
         if not self._poll.poll(timeout):
             return None
         rx = os.read(self._fd, 4096)
-        print 'recv: ' + ' '.join(['%02x' % ord(c) for c in rx])
+        #print 'recv: ' + ' '.join(['%02x' % ord(c) for c in rx])
         return rx
 
     def send(self, data):
-        print 'send: ' + ' '.join(['%02x' % ord(c) for c in data])
+        #print 'send: ' + ' '.join(['%02x' % ord(c) for c in data])
         os.write(self._fd, data)
 
     def fileno(self):
