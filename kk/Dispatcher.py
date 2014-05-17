@@ -1,11 +1,12 @@
 import time, sys
+from collections import defaultdict
 
 from Frame import Frame, FrameLayer
 from OurException import OurException
 
 class Dispatcher:
     def __init__(self, frameLayer):
-        self.typeToProto = {}
+        self.typeToProto = defaultdict(lambda: [])
         self.nameToProto = {}
         self.callbacks = []
         self.frameLayer = frameLayer
@@ -16,7 +17,7 @@ class Dispatcher:
         
         # proto is valid
         for t in frameTypes:
-            self.typeToProto[t] = proto
+            self.typeToProto[t].append(proto)
         self.nameToProto[name] = proto
         
         proto.doRegistration(self)
@@ -49,6 +50,7 @@ class Dispatcher:
                 if frame:
                     ftype = frame.type()
                     if ftype in self.typeToProto:
-                        self.typeToProto[ftype].handleFrame(frame)
+                        for proto in self.typeToProto[ftype]:
+                            proto.handleFrame(frame)
                     else:
                         print >> sys.stderr, 'Cannot dispatch frame', frame
