@@ -32,10 +32,7 @@ class Frame:
     def fromReceived(self, msg, firstTiming, power):
         self._bytes = msg
         self._timing = firstTiming
-        if power and power.__class__ == [].__class__:
-            self._power = sum(power)/len(power)
-        else:
-            self.power = power
+        self.power = power
 
     def toSend(self, ftype, fromId, toId, payload):
         l = len(payload)
