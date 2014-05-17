@@ -58,9 +58,9 @@ Przy rejestracji protokół podaje nazwę (po której będzie można go znaleź�
 oraz z jakimi typami ramek ma być skojarzony. Ramki tego typu zostaną mu przekazane po odebraniu.
 Klasa umożliwia też rejestrowanie callbacków z zadanymi terminami wykonania.
 Opis funkcji:
--  registerProto(proto: Proto, name: string, frameTypes: string)
-    Funkcja rejestrująca protokół proto o nazwie name skojarzony z typami ramek podanymi
-    w stringu frameTypes. Jeden typ może być skojarzony z wieloma protokołami!
+-  registerProto(proto: Proto, name: string)
+    Funkcja rejestrująca protokół proto o nazwie name. Zostaje on skojarzony z typami występującymi
+    w stringu proto.frameTypes. Jeden typ może być skojarzony z wieloma protokołami!
 
 - getProtoByName(name: string)
     Funkcja zwracająca protokół, który podał nazwę name przy rejestracji.
@@ -80,6 +80,8 @@ Opis funkcji:
 Klasa bazowa każdego protokołu. Posiada pola dispatcher wskazującym na dispatchera 
 (lub None, jeżeli protokół jest niezarejestrowany) oraz frameLayer wskazującym na obiekt FrameLayer
 (lub None, w analogicznym przypadku).
+Klasa posiada pole frameTypes, koniecznie do przeładowania w klasach pochodnych. Jest to string
+lub lista bajtów, które oznaczają typy ramek skojarzonych z danym protokołem.
 Opis metod:
 - handleFrame(frame)
     Funkcja "wirtualna", którą trzeba zaimplementować w klasie pochodnej. Jest ona wywoływana 

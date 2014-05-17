@@ -11,12 +11,12 @@ class Dispatcher:
         self.callbacks = []
         self.frameLayer = frameLayer
         
-    def registerProto(self, proto, name, frameTypes):
+    def registerProto(self, proto, name):
         if name in self.nameToProto:
             raise OurException('This protocol name has been already taken')
         
         # proto is valid
-        for t in frameTypes:
+        for t in proto.frameTypes:
             self.typeToProto[t].append(proto)
         self.nameToProto[name] = proto
         

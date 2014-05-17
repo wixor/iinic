@@ -13,6 +13,8 @@ def sampleCallback():
     print 'This is sample callback, now is', time.time()
 
 class SampleProto(Proto):
+    frameTypes = 's'
+    
     def __init__(self):
         Proto.__init__(self)
     
@@ -36,13 +38,13 @@ def main(mode):
         dispatcher = Dispatcher(frameLayer)
         
         sample = SampleProto()
-        dispatcher.registerProto(sample, 'sample', 's')
+        dispatcher.registerProto(sample, 'sample')
         
         pp = PingPongProto()
-        dispatcher.registerProto(pp, 'ping-pong', 'p')
+        dispatcher.registerProto(pp, 'ping-pong')
         
         try:
-            dispatcher.registerProto(sample, 'foo', 's')
+            dispatcher.registerProto(sample, 'sample')
         except:
             pass # yes, we expected you, Mr. Exception
         
