@@ -69,54 +69,11 @@ class FrameLayer:
     def __init__(self, nic, myId = None):
         self.nic = nic
         self.myId = myId or self.nic.get_uniq_id()
-        self.buff = None
 
     def getMyId(self):
         return self.myId
 
-    def _nextByte(self, deadline):
-        if self.buff:
-            x = self.buff
-            self.buff = None
-            assert x
-            return x
-        byte = self.nic.rx(deadline)
-        return byte
-
-    def _unnext(self, byte):
-        assert not self.buff
-        self.buff = byte
-
-    def _receiveFrame_OLD(self, deadline = None): # deadline for first message
-        expectDiff = 1000000/self.nic._txbitrate*8 + Config.TIMING_VARIANCE
-        message = ''
-
-        first = self._nextByte(deadline)
-        if not first:
-            return None
-        message += first.byte
-        powers = [first.power]
-
-        lastTime = first.timing
-        length = ord(first.byte) + Frame.lengthOverhead()
-        for i in xrange(length-1):
-            rxbyte = self._nextByte(time.time() + Config.INNER_DEADLINE)
-            if not rxbyte:
-                return None
-            if rxbyte.timing - lastTime > expectDiff:
-                # maybe it's a byte from the next frame? undo 'next'
-                self._unnext(rxbyte)
-                return None
-            lastTime = rxbyte.timing
-            message += rxbyte.byte
-            powers += [rxbyte.power]
-        frame = Frame()
-        frame.fromReceived(message, first.timing, powers)
-        if not frame.isValid():
-            return None
-        return frame
-
-    def _receiveFrame_NEW(self, deadline = None): # deadline for first message
+    def _receiveFrame(self, deadline = None): # deadline for first message
         rxbytes = self.nic.rx(deadline)
         if not rxbytes:
             return None
@@ -133,9 +90,8 @@ class FrameLayer:
         return frame
 
     def receiveFrame(self, deadline = None):
-        recv = self._receiveFrame_OLD if Config.CURRENT_VERSION == Config.API_VERSION.OLD else self._receiveFrame_NEW
         while not deadline or time.time() < deadline:
-            frame = recv(deadline)
+            frame = self._receiveFrame(deadline)
             if frame:
                 return frame
         return None
