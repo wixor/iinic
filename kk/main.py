@@ -7,6 +7,7 @@ from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
 from PingPongProto import PingPongProto
+from MonitorProto import MonitorProto
 import Config
 
 def sampleCallback():
@@ -33,10 +34,9 @@ def main(mode):
     frameLayer = FrameLayer(nic)
     myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
+    dispatcher = Dispatcher(frameLayer)
     
     if mode == 'd':
-        dispatcher = Dispatcher(frameLayer)
-        
         sample = SampleProto()
         dispatcher.registerProto(sample, 'sample')
         
@@ -54,10 +54,9 @@ def main(mode):
         dispatcher.loop()
     
     if mode == 'r':
-        while True:
-            frame = frameLayer.receiveFrame(deadline = time.time() + 100.0)
-            if frame:
-                print 'Timing:', frame.timing(), frame
+        monitor = MonitorProto()
+        dispatcher.registerProto(monitor, 'monitor')
+        dispatcher.loop()
 
     if mode == 's':
         frameLayer.sendFrame('s', myId, 0, 'blah')
