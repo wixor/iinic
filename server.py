@@ -170,7 +170,7 @@ class Client(object):
             logging.info('peer %s sent invalid rx_knobs (0x%02X)', self.peer, e.rx_knobs)
 
         logging.info('peer %s :: setRxKnobs (freq %.3fMHz, deviation %dkHz, bandwidth %dkHz, rssi %ddB, gain %ddB)',
-            self.peer, 20. * (43. + e.frequency / 4000), 15*(1+e.deviation), bw, rssi, gain)
+            self.peer, 20. * (43. + e.frequency / 4000.), 15*(1+e.deviation), bw, rssi, gain)
         self.frequency = e.frequency
         self.nextCommand()
 
