@@ -272,7 +272,7 @@ class NIC(object):
             bitrate = bitrate
         ).serialize())
         self._bitrate = bitrate
-
+ 
     def set_sensitivity(self, gain, rssi):
         self._comm.send(SetRxKnobsToken(
             frequency = self._channel._freq,

@@ -8,6 +8,8 @@ from Proto import Proto
 from Dispatcher import Dispatcher
 from PingPongProto import PingPongProto
 from MonitorProto import MonitorProto
+from TimeSyncProto import TimeSyncProto
+
 import Config
 
 def sampleCallback():
@@ -62,6 +64,11 @@ def main(mode):
         frameLayer.sendFrame('s', myId, 0, 'blah')
         approx = frameLayer.nic.get_approx_timing() # TODO: expose this method
         frameLayer.sendFrame('x', myId, 0, 'blah blah', approx + 2000000)
+        
+    if mode == 't':
+        sync = TimeSyncProto()
+        dispatcher.registerProto(sync, 'sync')
+        dispatcher.loop()
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:

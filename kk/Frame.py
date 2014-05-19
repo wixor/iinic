@@ -44,7 +44,7 @@ class Frame:
     def bytes(self):
         return self._bytes
     def __repr__(self):
-        return 'From:'+str(self.fromId())+' To:'+str(self.toId())+' Payload:'+self.content()
+        return 'From:'+str(self.fromId())+' To:'+str(self.toId())+'Type: '+str(ord(self.type()))+' Payload:'+self.content()
     def type(self):
         return self._bytes[1]
     def fromId(self):
@@ -104,9 +104,27 @@ class FrameLayer:
             self.nic.timing(timing)
         
         self.nic.tx(frame.bytes())
-        
-    def sync(self, deadline = None):
+    
+    # do not use it in protocols
+    def _sync(self, deadline = None):
         self.nic.sync(deadline)
         
-    # TODO: set channel, set power, get approx timing, get uniq_id
+    def set_bitrate(self, bitrate):
+        self.nic.set_bitrate(bitrate)
+        
+    def set_channel(self, channel):
+        self.nic.set_channel(channel)
+        
+    # advanced
+    def set_power(self, power):
+        self.nic.set_power(power)
+        
+    # advanced
+    def set_sensitivity(self, gain, rssi):
+        self.nic.set_sensitivity(self, gain, rssi)
+        
+    def get_byte_send_time(self):
+        bps = 43103.448 / (1.0+self.nic._bitrate)
+        print 'bps =', bps
+        return 1.0 / bps
         

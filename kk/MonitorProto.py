@@ -5,6 +5,7 @@ class MonitorProto(Proto):
     frameTypes = ''
     def __init__(self):
         Proto.__init__(self)
+        self.frameTypes = ''
         for i in xrange(1, 255):
             self.frameTypes += chr(i)
         
