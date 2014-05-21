@@ -80,7 +80,8 @@ class FrameLayer:
             return None
        
         frame = Frame()
-        frame.fromReceived(rxbytes.bytes[0:length], rxbytes.timing, rxbytes.rssi)
+        frame.fromReceived(rxbytes.bytes[0:length], int(rxbytes.timing-5000000.0*self.get_byte_send_time()), rxbytes.rssi)
+        # -5000000.0*self.get_byte_send_time()
         if not frame.isValid():
             return None
         
@@ -97,13 +98,10 @@ class FrameLayer:
         frame = Frame()
         frame.toSend(ftype, fromId, toId, content)
 
-        if ftype == 'E':
-            frame.bytes = frame.bytes[:-1] # create invalid (too short) frame! just for testing purposes
-
         if timing:
             self.nic.timing(timing)
         
-        self.nic.tx(frame.bytes())
+        return self.nic.tx(frame.bytes())
     
     # do not use it in protocols
     def _sync(self, deadline = None):
@@ -125,6 +123,5 @@ class FrameLayer:
         
     def get_byte_send_time(self):
         bps = 43103.448 / (1.0+self.nic._bitrate)
-        print 'bps =', bps
         return 1.0 / bps
         
