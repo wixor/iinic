@@ -400,6 +400,10 @@ class NetComm(object):
 
     def fileno(self):
         return self._sock.fileno()
+    
+class LocalNetComm(NetComm):
+    def __init__(self, port = 2048):
+        NetComm.__init__(self, '127.0.0.1', port)
 
 class USBComm(object):
     def __init__(self, device=None):
