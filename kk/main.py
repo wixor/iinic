@@ -55,24 +55,27 @@ def main(mode):
         dispatcher.scheduleRepeatingCallback(sampleCallback, time.time()+3, 10)
         dispatcher.loop()
     
-    if mode == 'r':
+    elif mode == 'r':
         monitor = MonitorProto()
         dispatcher.registerProto(monitor, 'monitor')
         dispatcher.loop()
 
-    if mode == 's':
+    elif mode == 's':
         frameLayer.sendFrame('s', myId, 0, 'blah')
         approx = frameLayer.nic.get_approx_timing() # TODO: expose this method
         frameLayer.sendFrame('x', myId, 0, 'blah blah', approx + 2000000)
         
-    if mode == 't':
+    elif mode == 't':
         sync = TimeSyncProto()
         dispatcher.registerProto(sync, 'sync')
         dispatcher.loop()
+        
+    else:
+        print 'Invalid mode', mode
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        print 'Usage:', sys.argv[0], '[r|s|d]'
+        print 'Usage:', sys.argv[0], '[r|s|d|t]'
         sys.exit(1)
         
     main(sys.argv[1])
