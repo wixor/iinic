@@ -6,6 +6,7 @@ from Proto import Proto
 import Config
 
 class State:
+    PREPARING = 0
     STARTING = 1
     DEMAND_SYNC = 2 # heard something, waiting for sync
     SYNCED = 3
@@ -37,89 +38,98 @@ class TimeSyncProto(Proto):
     
     ## helper functions ##
     
-    def _roundDuration(self):
+    def _approxRoundDuration(self): 
         if 'roundDuration' not in self.__dict__:
-            self.roundDuration = (255.0 + Config.SILENCE_BEFORE + Config.SILENCE_AFTER + Frame.lengthOverhead()) * self.frameLayer.get_byte_send_time()
+            self.roundDuration = (255.0 + 10.0 + Frame.lengthOverhead()) * self.frameLayer.get_byte_send_time()
+        # print 'round duration: ', self.roundDuration
         return self.roundDuration
     
     def _computeBackoff(self, index):
-        return 5.0*(1+index*index) # TODO: be more smart
-    
+        return 2.0+index*index # TODO: be more smart
+
     def _isLess(self, x, y):
-        return x + 1000000.0 * self._roundDuration() * 0.01 < y
+        return x + 1000000.0 * self._approxRoundDuration() * 0.01 < y
     
     def _sendSyncFrame(self):
         frame = Frame()
-        # def sendFrame(self, ftype, fromId, toId, content, timing = None):
-        timing = self.frameLayer.nic.get_approx_timing() + 100
-        log('  approx timing %d' % (timing,))
-        self.frameLayer.sendFrame(ftype='s', fromId=self.frameLayer.getMyId(), toId=0, content=str(timing), timing=timing)
+        timing = self.getApproxTiming() + 100000
+        self.frameLayer.sendFrame(ftype='s', fromId=self.frameLayer.getMyId(), toId=0, content=str(timing+self.clockDiff), timing=timing)
+        print 'Sent sync frame in state %d' % (self.state)
+
+    def _changeState(self, newState):
+        self.state = newState
+        self.stateNo += 1
 
     ## logic functions ##
-    
+
     def _gotSynced(self):
+        self._masterSync(self.stateNo, 1)
         log('Got synced, time diff %d' % (self.clockDiff))
-        pass # TODO: do something!
-    
+        # TODO: notify protocols
+
     def _startBeingMaster(self):
         if self.state != State.STARTING:
-            return # nope.
-        else:
-            self.state = State.SYNCED
-            self.clockDiff = 0 # clock difference is zero :)
-            self._masterSync()
-            self._gotSynced()
-            
-    def _mustSync(self): # TODO: nope, there will be conflicts!
-        if random.randint(1, 2**self.msNo) == 1:
-            self._sendSyncFrame()
-            
-        if self.msNo < self.MUST_SYNC_REPEAT:
-            backoff = self._computeBackoff(self.msNo)
-            self.msNo += 1
-            self.dispatcher.scheduleCallback(self._mustSync, backoff*self._roundDuration())
-        else:
-            self.msNo = 1
-            
-    def _demandSync(self):
-        if self.state | State.SYNCED:
-            return # nothing to demand
-        self._sendSyncFrame()
-        backoff = self._computeBackoff(self.bsNo)
-        self.bsNo += 1
-        self.dispatcher.scheduleCallback(self._demandSync, backoff*self._roundDuration())
+            return # too late
+        
+        self._changeState(State.SYNCED)
+        self.clockDiff = 0 # clock difference is zero :)
+        self._gotSynced()
+
+    def _mustSync(self, stateNo, callNo): # TODO: there will be conflicts!
+        if stateNo != self.stateNo or callNo > self.MUST_SYNC_REPEAT:
+            return
     
-    def _masterSync(self):
+        if random.randint(1, 2**callNo) == 1:
+            self._sendSyncFrame()
+
+        backoff = self._computeBackoff(callNo)
+        self.dispatcher.scheduleCallback(lambda: self._mustSync(stateNo, callNo+1), time.time() + backoff*self._approxRoundDuration())
+
+    def _demandSync(self, stateNo, callNo):
+        if stateNo != self.stateNo:
+            return
+
         self._sendSyncFrame()
-        backoff = self._computeBackoff(self.masterNo)
-        if self.masterNo == self.MASTER_SYNC_FRAMES_COUNT:
-            self.masterNo = 1
-        else:
-            self.masterNo += 1
-            self.dispatcher.scheduleCallback(self._masterSync, backoff*self._roundDuration())
+        backoff = self._computeBackoff(callNo)
+        self.dispatcher.scheduleCallback(lambda: self._demandSync(stateNo, callNo+1), time.time() + backoff*self._approxRoundDuration())
+
+    def _masterSync(self, stateNo, callNo):
+        if stateNo != self.stateNo or callNo > self.MASTER_SYNC_FRAMES_COUNT:
+            return
+
+        self._sendSyncFrame()
+        backoff = self._computeBackoff(callNo)
+        self.dispatcher.scheduleCallback(lambda: self._masterSync(stateNo, callNo+1), time.time() + backoff*self._approxRoundDuration())
         
     def _debugCallback(self):
-        log('State %d, msNo %d, dsNo %d, round %1.6f, clockDiff %d' % (self.state, self.msNo, self.dsNo, self._roundDuration(), self.clockDiff))
-    
+        log('State %d, stateNo %d, round %1.6f, clockDiff %d' % (self.state, self.stateNo, self._approxRoundDuration(), self.clockDiff))
+
     ## public functions ##
-    
+
     def __init__(self):
         Proto.__init__(self)
         if not self.frameTypes:
             self.frameTypes = ''
             for i in xrange(0,256):
                 self.frameTypes += chr(i)
-        self.msNo = 1
-        self.dsNo = 1
-        self.masterNo = 1
         self.clockDiff = 0
+        self.stateNo = 0
 
     def onStart(self):
-        self.state = State.STARTING
-        self.dispatcher.scheduleCallback(self._startBeingMaster, time.time()+self.LISTEN_ON_START*self._roundDuration())
+        self._changeState(State.PREPARING)
+        self.syncWithCard()
+        self.dispatcher.scheduleCallback(self.startAlgo, time.time() + 1.5)
+    
+    def startAlgo(self):
+        self._changeState(State.STARTING)
+        print 'Starting algorithm'
+        self.dispatcher.scheduleCallback(self._startBeingMaster, time.time()+self.LISTEN_ON_START*self._approxRoundDuration())
         self.dispatcher.scheduleRepeatingCallback(self._debugCallback, time.time()+0.1, 1.0)
         
     def handleFrame(self, frame):
+        if self.state == State.PREPARING:
+            return
+        
         ftype = frame.type()
         recvTime = None
         if ftype == 's':
@@ -129,28 +139,58 @@ class TimeSyncProto(Proto):
                 recvTime = None
     
         if recvTime: # is sync frame!
+            print 'received sync frame at %d with %d (%d)' % (frame.timing(), recvTime, recvTime-frame.timing())
             myTime = frame.timing() + self.clockDiff
             if self.state == State.SYNCED:
                 if self._isLess(recvTime, myTime): # somebody has lower time
-                    log('Must sync somebody, times: %d vs %d' % (myTime, recvTime))
-                    self.dispatcher.scheduleCallback(self._mustSync, time.time()+random.random()*5.0)
-                else:
-                    log('Lost sync to somebody, times: %d vs %d' % (myTime, recvTime))
+                    log('Must sync somebody, times: %d vs %d (%d)' % (myTime, recvTime, myTime-recvTime))
+                    self.dispatcher.scheduleCallback(lambda: self._mustSync(self.stateNo, 1), time.time()+random.random()*5*self.roundDuration())
+                elif self._isLess(myTime, recvTime): # somebody has higher time
+                    log('Lost sync to somebody, times: %d vs %d (%d)' % (myTime, recvTime, myTime-recvTime))
                     self.clockDiff = 0
-                    self.state = State.DEMAND_SYNC
-                    self._demandSync()
-                    #TODO: notify others that we lost sync
-                    
+                    self._changeState(State.DEMAND_SYNC)
+                    #TODO: notify other protocols that we lost sync
+                else :
+                    log('Frame ok.')
+
             if self.state != State.SYNCED:
                 if self._isLess(recvTime, myTime):
                     log('Ignore as for now')
                     pass # ignore
                 else:
-                    self.clockDiff = recvTime - myTime
-                    self.state = State.SYNCED
+                    self.clockDiff = recvTime - frame.timing()
+                    self._changeState(State.SYNCED)
                     self._gotSynced()
         
         else: # some other frame
             if self.state == State.STARTING:
-                self.state = DEMAND_SYNC
-                self._demandSync()
+                self._changeState(State.DEMAND_SYNC)
+                self.dsNo = 1
+                self._demandSync(self.stateNo, 1)
+                
+    
+    def syncWithCard(self):
+        self._roundTripSent = time.time()
+        pingFuture = self.frameLayer.nic.ping()
+        pingFuture.add_callback(self._ping1back)
+        
+        approx = self.frameLayer.nic.get_approx_timing()
+        self._syncPingSent = approx+1000000
+        self.frameLayer.nic.timing(self._syncPingSent) # 1 sec should be safe
+        pingFuture = self.frameLayer.nic.ping()
+        pingFuture.add_callback(self._ping2back)
+
+    def _ping1back(self):
+        self.roundTripTime = int(1000000*(time.time() - self._roundTripSent))
+
+    def _ping2back(self):
+        if 'roundTripTime' not in self.__dict__:
+            raise OurException('Sync with card failed.')
+        self.approxCardTimeDiff = self._syncPingSent - self.frameLayer.nic.get_approx_timing() + self.roundTripTime
+        print 'Card time diff:', self.approxCardTimeDiff
+        
+    def getApproxTiming(self):
+        return self.frameLayer.nic.get_approx_timing() + self.approxCardTimeDiff
+        
+        
+        
