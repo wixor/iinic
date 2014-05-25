@@ -105,3 +105,80 @@ komunikacja nam się urwała po pewnym czasie, uznajemy, że jesteśmy stroną i
 i co 2 sekundy wysyłamy "Ping 1" w eter. Po szczegóły polecam wczytać się w kod.
 
 
++++ TimeSyncProto.py +++
+Prosty (prawdopodobnie zbyt prosty) asynchroniczny protokół do synchronizacji czasu. Celem tego
+protokołu jest obliczenie różnicy między "moim" czasem karty, a czasem karty, która wystartowała
+jako pierwsza w całej sieci. No, nie do końca, tak naprawdę chodzi o maksimum ze wskazań zegarów
+wszystkich kart w sieci. Po zsynchronizowaniu się, protokół ustawia pole self.clockDiff, będący
+różnicą między "moim" zegarem a najstarszym zegarem. Wartość ta jest (powinna być!) zawsze
+nieujemna.
+Typ ramek właściwy dla tego protokołu to 'S', tzw ramki sync. Są to ramki, zawierające jedną
+liczbę (zapisaną jako string) będącą zawsze aktualnym wirtualnym wskazaniem zegara. Wirtualnym 
+tzn rzeczywistym przesuniętym o clockDiff (który może być zero).
+Każde przejście do stanu SYNCED, czyli uznanie, że jesteśmy zsyncrhonizowani, zwieńczone jest
+wysłaniem pięciu (MASTER_SYNC_FRAMES_COUNT) ramek sync z kwadratowym backoffem.
+Ramki te są wysyłane niezależnie od innych protokołów (TODO), dlatego TimeSyncProto nazwałem
+asynchronicznym.
+Wszystkie porównania czasów następują z pewną tolerancją odpowiadającą mniej więcej czasowi
+wysłania jednego bajtu (TODO).
+Jest to protokół stanowy z następującymi stanami:
+0. PREPARING
+    Stan oczekiwania na zsynchronizowanie się z kartą. Za pomocą pingów obliczamy
+    * roundTripTime będący sumę czasów: wysłania polecenia do karty oraz dotarcia danych z karty
+    * approxCardTimeDiff będący sumą: opóźnienia pomiędzy get_approx_time_diff obiektu NIC
+        a jego realnym czasem oraz wartości roundTripTime. Wartość approxCardTimeDiff należy brać
+        pod uwagę, jeżeli chcemy zadać warstwie frameLayer wysłanie ramki o określonym timingu i
+        chcemy, żeby karta otrzymała ten komunikat w przyszłości. Do tej wartości można dobrać
+        się metodą self.getApproxTiming().
+    Uwaga! Wszystkie wartości tutaj są jedynie orientacyjne i nie ma żadnych gwarancji co do ich
+    poprawności. Z moich eksperymentów wynika, że dla symulatora warto zwiększyć opóźnienie
+    o kolejne 100ms (patrz: funkcja _sendSyncFrame()).
+    
+    W tym stanie wszystkie ramki są *ignorowane*.
+    
+    Po upływie 1.5s zakładamy, że synchronizacja z kartą się udała i przechodzimy do następnego
+    stanu.
+    
+1. STARTING
+    Stan nasłuchiwania na istniejącą komunikację i trwa przez maksymalnie LISTEN_ON_START
+    jednostek czasu, gdzie jednostka jest zgrubnym oszacowaniem na czas potrzebny do wysłania 255
+    bajtów i jeszcze trochę.
+    
+    Jeżeli nie usłyszeliśmy żadnej komunikacji, uznajemy, że być może jesteśmy jedynym urządzeniem
+    i przechodzimy do stanu SYNCED; oczywiście ustalamy clockDiff na 0.
+    
+    Jeżeli usłyszeliśmy jakąś ramkę, ale NIE jest to ramka sync, przechodzimy do stanu DEMAND_SYNC.
+    
+    Jeżeli usłyszeliśmy ramkę sync z mniejszym czasem, ignorujemy ją.
+    
+    Jeżeli usłyszeliśmy ramkę sync z większym czasem, dosynchronizowujemy się do niej, tzn 
+    clockDiff := wartość_w_ramce - czas_jej_odebrania
+    i przechodzimy do stanu SYNCED.
+    
+2. DEMAND_SYNC
+    Jest to stan, w którym nakłaniamy sąsiednie urządzenia do podania nam obowiązującego w sieci
+    czasu. Wysyłamy po prostu ramki sync z clockDiff = 0 (niepoprawnym) oraz kwadratowym backoffem
+    tak długo, aż nie otrzymamy ramki sync z wyższym czasem. Wówczas ustalamy clockDiff i
+    przechodzimy do stanu SYNCED.
+    
+3. SYNCED
+    Jest to stan, w którym uznajemy, że jesteśmy dosynchronizowani do reszty sieci.
+    
+    Jeżeli otrzymamy ramkę sync z czasem niższym niż nasz, wysyłamy 5 ramek typu sync z kwadratowym
+    backoffem.
+    
+UWAGI dla użytkowników protokołu
+1. Stan SYNCED jest dość subiektywny; istnieje oczywiście możliwość, że w tym stanie NIE jesteśmy 
+zsynchronizowani. Należy się więc liczyć z tym, że z tego stanu wypadniemy.
+
+2. Niniejszy opis nie precyzuje bardzo wielu kwestii (np: co, gdy dostaniemy kolejne niepoprawne ramki
+typu sync w trakcie synchronizowania kogoś?). Należy go traktować jako zarys opisu.
+
+3. Jeżeli chcemy zostać powiadomieni o zmianie stanu, proszę dopisać stosowne linijki kodu w
+funkcjach _gotSynced oraz _lostSync.
+
+4. Jeżeli dopiszemy jakiś protokół wyższej warstwy, proponuję przemyślenie dwóch rzeczy:
+    * przeniesienie wysłania ramki do wyższej warstwy (żeby nie psuć np. struktury rund i nie
+        powodować niepotrzebnych kolizji)
+    * automatyczną dedukcję struktury rund z istniejącej komunikacji (np wiedząc, że wszystkie
+        ramki zostaną wysłane na początku jakiejś rundy)
