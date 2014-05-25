@@ -165,7 +165,8 @@ Jest to protokół stanowy z następującymi stanami:
     Jest to stan, w którym uznajemy, że jesteśmy dosynchronizowani do reszty sieci.
     
     Jeżeli otrzymamy ramkę sync z czasem niższym niż nasz, wysyłamy 5 ramek typu sync z kwadratowym
-    backoffem.
+    backoffem. K-tą (k=1...5) ramkę wysyłamy z prawdopodobieństwem 2**(-k), żeby zapobiec
+    zapychaniu się łącza.
     
 UWAGI dla użytkowników protokołu
 1. Stan SYNCED jest dość subiektywny; istnieje oczywiście możliwość, że w tym stanie NIE jesteśmy 
