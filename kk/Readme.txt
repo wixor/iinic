@@ -45,11 +45,14 @@ Ten plik eksportuje dwie klasy:
         zwraca mój identyfikator
     - receiveFrame(deadline: double = None)
         funkcja odbierająca pojedynczą ramkę. Argument deadline ma taką samą semantykę, 
-        jak w przypadku funkcji NIC.rx().
+        jak w przypadku funkcji NIC.rx(). Wartością zwracaną jest obiekt typu Frame, gdzie timing
+        tej ramki jest równy czasowi rozpoczęcia odbioru ramki (czyli ma taką samą semantykę, jak
+        timing w metodzie sendFrame).
     - sendFrame(ftype: char, fromId: unsigned short, toId: unsigned short, content: string, 
         timing: double = None)
         funkcja wysyłająca ramkę, a konkretnie wysyłająca do urządzenia/symulatora polecenie
-        wysłania ramki - czyli ta funkcja NIE synchronizuje się z kartą.
+        wysłania ramki - czyli ta funkcja NIE synchronizuje się z kartą. Funkcja zwraca
+        dokładnie to, co zwraca metoda .tx() obiektu NIC.
 
 +++ Dispatcher.py +++
 Klasa odpowiedzialna za odbieranie ramek i przekazywanie ich odpowiednim protokołom. 
@@ -100,4 +103,5 @@ Jeżeli odebraliśmy wiadomość postaci Ping X lub Pong X, gdzie X jest liczbą
 odpowiednio Pong X+1 lub Ping X+1 po sekundzie i tak w kółko. Jeżeli nic nie odebraliśmy lub
 komunikacja nam się urwała po pewnym czasie, uznajemy, że jesteśmy stroną inicjującą
 i co 2 sekundy wysyłamy "Ping 1" w eter. Po szczegóły polecam wczytać się w kod.
+
 
