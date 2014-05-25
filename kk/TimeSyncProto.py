@@ -48,7 +48,7 @@ class TimeSyncProto(Proto):
         return 2.0+index*index # TODO: be more smart
 
     def _isLess(self, x, y):
-        return x + 1000000.0 * self._approxRoundDuration() * 0.01 < y
+        return x + 1000000.0 * self._approxRoundDuration() / 275.0 < y
     
     def _sendSyncFrame(self):
         frame = Frame()
@@ -65,6 +65,10 @@ class TimeSyncProto(Proto):
     def _gotSynced(self):
         self._masterSync(self.stateNo, 1)
         log('Got synced, time diff %d' % (self.clockDiff))
+        # TODO: notify protocols
+        
+    def _lostSync(self):
+        pass
         # TODO: notify protocols
 
     def _startBeingMaster(self):
@@ -149,6 +153,7 @@ class TimeSyncProto(Proto):
                     log('Lost sync to somebody, times: %d vs %d (%d)' % (myTime, recvTime, myTime-recvTime))
                     self.clockDiff = 0
                     self._changeState(State.DEMAND_SYNC)
+                    self._lostSync()
                     #TODO: notify other protocols that we lost sync
                 else :
                     log('Frame ok.')
