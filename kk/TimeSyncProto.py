@@ -24,14 +24,10 @@ class State:
 # if received with lower timing, sync them until I receive a message
 
 def log(s):
-    pass
-
-'''
     t = time.time()
     ti = int(t)
     t -= 100.0*(ti/100)
     print '%02.6f: %s' % (t, s)
-'''
 
 class TimeSyncProto(Proto):
     LISTEN_ON_START = 10 # listen for 20X rounds

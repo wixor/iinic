@@ -9,6 +9,7 @@ from Dispatcher import Dispatcher
 from PingPongProto import PingPongProto
 from MonitorProto import MonitorProto
 from TimeSyncProto import TimeSyncProto
+from SendingProto import SendingProto
 
 import Config
 
@@ -30,8 +31,8 @@ class SampleProto(Proto):
     def onStart(self):
         pass
 
-def main(mode):
-    comm = iinic.USBComm() if Config.ON_DEVICE else iinic.LocalNetComm()
+def main(mode, device=None, send_interval=0, send_payload='blah '):
+    comm = iinic.USBComm(device) if Config.ON_DEVICE else iinic.NetComm()
     nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
     myId = frameLayer.getMyId()
@@ -61,15 +62,15 @@ def main(mode):
         dispatcher.loop()
 
     elif mode == 's':
-        frameLayer.sendFrame('s', myId, 0, 'blah')
-        approx = frameLayer.nic.get_approx_timing() # TODO: expose this method
-        frameLayer.sendFrame('x', myId, 0, 'blah blah', approx + 2000000)
-        
+        send = SendingProto(interval, payload)
+        dispatcher.registerProto(send, 'send')
+        dispatcher.loop()
+                        
     elif mode == 't':
         sync = TimeSyncProto()
         dispatcher.registerProto(sync, 'sync')
         dispatcher.loop()
-        
+
     else:
         print 'Invalid mode', mode
 

@@ -44,7 +44,7 @@ class Frame:
     def bytes(self):
         return self._bytes
     def __repr__(self):
-        return 'From:'+str(self.fromId())+' To:'+str(self.toId())+'Type: '+str(ord(self.type()))+' Payload:'+self.content()
+        return 'From:%5d To:%5d Type:%3d(%c) Payload:%s' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload())
     def type(self):
         return self._bytes[1]
     def fromId(self):
@@ -53,6 +53,8 @@ class Frame:
         return strToId(self._bytes[2+Config.ID_LENGTH:2+2*Config.ID_LENGTH])
     def content(self):
         return self._bytes[2+2*Config.ID_LENGTH:-1]
+    def payload(self):
+        return self.content()
     def isValid(self):
         return self._bytes[-1] == chr(computeCRC_8(self._bytes[:-1]))
     def timing(self):

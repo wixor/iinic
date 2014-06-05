@@ -1,6 +1,7 @@
 from OurException import OurException
 
 class Proto:
+    # assign this
     frameTypes = None
     
     def __init__(self):

@@ -13,4 +13,4 @@ class MonitorProto(Proto):
         pass
         
     def handleFrame(self, frame):
-        print 'Timing:', frame.timing(), frame
+        print 'Timing: %10d %s' % (frame.timing(), frame)
