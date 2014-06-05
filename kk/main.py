@@ -31,7 +31,7 @@ class SampleProto(Proto):
     def onStart(self):
         pass
 
-def main(mode, device=None, send_interval=0, send_payload='blah '):
+def main(mode, device=None, send_interval=1000000, send_payload='blah'):
     comm = iinic.USBComm(device) if Config.ON_DEVICE else iinic.NetComm()
     nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
@@ -62,10 +62,10 @@ def main(mode, device=None, send_interval=0, send_payload='blah '):
         dispatcher.loop()
 
     elif mode == 's':
-        send = SendingProto(interval, payload)
+        send = SendingProto(send_interval, send_payload)
         dispatcher.registerProto(send, 'send')
         dispatcher.loop()
-                        
+
     elif mode == 't':
         sync = TimeSyncProto()
         dispatcher.registerProto(sync, 'sync')
