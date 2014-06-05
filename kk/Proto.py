@@ -1,6 +1,8 @@
 from OurException import OurException
 
 class Proto:
+    frameTypes = None
+    
     def __init__(self):
         self.frameLayer = None
         self.dispatcher = None

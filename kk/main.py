@@ -7,12 +7,15 @@ from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
 from PingPongProto import PingPongProto
+from MonitorProto import MonitorProto
 import Config
 
 def sampleCallback():
     print 'This is sample callback, now is', time.time()
 
 class SampleProto(Proto):
+    frameTypes = 's'
+    
     def __init__(self):
         Proto.__init__(self)
     
@@ -31,18 +34,17 @@ def main(mode):
     frameLayer = FrameLayer(nic)
     myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
+    dispatcher = Dispatcher(frameLayer)
     
     if mode == 'd':
-        dispatcher = Dispatcher(frameLayer)
-        
         sample = SampleProto()
-        dispatcher.registerProto(sample, 'sample', 's')
+        dispatcher.registerProto(sample, 'sample')
         
         pp = PingPongProto()
-        dispatcher.registerProto(pp, 'ping-pong', 'p')
+        dispatcher.registerProto(pp, 'ping-pong')
         
         try:
-            dispatcher.registerProto(sample, 'foo', 's')
+            dispatcher.registerProto(sample, 'sample')
         except:
             pass # yes, we expected you, Mr. Exception
         
@@ -52,10 +54,9 @@ def main(mode):
         dispatcher.loop()
     
     if mode == 'r':
-        while True:
-            frame = frameLayer.receiveFrame(deadline = time.time() + 100.0)
-            if frame:
-                print 'Timing:', frame.timing(), frame
+        monitor = MonitorProto()
+        dispatcher.registerProto(monitor, 'monitor')
+        dispatcher.loop()
 
     if mode == 's':
         frameLayer.sendFrame('s', myId, 0, 'blah')
