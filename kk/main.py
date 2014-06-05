@@ -31,7 +31,7 @@ class SampleProto(Proto):
         pass
 
 def main(mode):
-    comm = iinic.USBComm() if Config.ON_DEVICE else iinic.NetComm()
+    comm = iinic.USBComm() if Config.ON_DEVICE else iinic.LocalNetComm()
     nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
     myId = frameLayer.getMyId()

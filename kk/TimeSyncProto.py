@@ -24,10 +24,14 @@ class State:
 # if received with lower timing, sync them until I receive a message
 
 def log(s):
+    pass
+
+'''
     t = time.time()
     ti = int(t)
     t -= 100.0*(ti/100)
     print '%02.6f: %s' % (t, s)
+'''
 
 class TimeSyncProto(Proto):
     LISTEN_ON_START = 10 # listen for 20X rounds
@@ -54,7 +58,6 @@ class TimeSyncProto(Proto):
         frame = Frame()
         timing = self.getApproxTiming() + 100000
         self.frameLayer.sendFrame(ftype='s', fromId=self.frameLayer.getMyId(), toId=0, content=str(timing+self.clockDiff), timing=timing)
-        print 'Sent sync frame in state %d' % (self.state)
 
     def _changeState(self, newState):
         self.state = newState
@@ -64,7 +67,7 @@ class TimeSyncProto(Proto):
 
     def _gotSynced(self):
         self._masterSync(self.stateNo, 1)
-        log('Got synced, time diff %d' % (self.clockDiff))
+        print 'Got synced, time diff %d' % (self.clockDiff)
         # TODO: notify protocols
         
     def _lostSync(self):
@@ -126,7 +129,6 @@ class TimeSyncProto(Proto):
     
     def startAlgo(self):
         self._changeState(State.STARTING)
-        print 'Starting algorithm'
         self.dispatcher.scheduleCallback(self._startBeingMaster, time.time()+self.LISTEN_ON_START*self._approxRoundDuration())
         self.dispatcher.scheduleRepeatingCallback(self._debugCallback, time.time()+0.1, 1.0)
         
@@ -143,12 +145,12 @@ class TimeSyncProto(Proto):
                 recvTime = None
     
         if recvTime: # is sync frame!
-            print 'received sync frame at %d with %d (%d)' % (frame.timing(), recvTime, recvTime-frame.timing())
             myTime = frame.timing() + self.clockDiff
+            print 'received sync frame at %d (%d) with %d' % (frame.timing(), myTime, recvTime)
             if self.state == State.SYNCED:
                 if self._isLess(recvTime, myTime): # somebody has lower time
                     log('Must sync somebody, times: %d vs %d (%d)' % (myTime, recvTime, myTime-recvTime))
-                    self.dispatcher.scheduleCallback(lambda: self._mustSync(self.stateNo, 1), time.time()+random.random()*5*self.roundDuration())
+                    self.dispatcher.scheduleCallback(lambda: self._mustSync(self.stateNo, 1), time.time()+random.random()*5*self._approxRoundDuration())
                 elif self._isLess(myTime, recvTime): # somebody has higher time
                     log('Lost sync to somebody, times: %d vs %d (%d)' % (myTime, recvTime, myTime-recvTime))
                     self.clockDiff = 0
