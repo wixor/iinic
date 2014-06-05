@@ -34,31 +34,48 @@ class Frame:
         self._timing = firstTiming
         self._power = power
 
-    def toSend(self, ftype, fromId, toId, payload):
+    def toSend(self, ftype, fromId, toId, payload, timing=None):
         l = len(payload)
+        self._timestampTag=0b10000000
         if l > 255:
             raise OurException('Frame payload too long, maximum is 255')
-        self._bytes = chr(l) + ftype + idToStr(fromId) + idToStr(toId) + payload
+        if l > 255 - 6 or timing == None: # We attach the timestamp to any frame we can.
+            self._timestampTag = 0
+        self._bytes = chr(l) + chr(self._timestampTag ^ ord(ftype)) + idToStr(fromId) + idToStr(toId) + payload
+        if self._timestampTag > 0:
+            self._bytes += struct.pack('I', timing)
         self._bytes += chr(computeCRC_8(self._bytes))
 
     def bytes(self):
         return self._bytes
     def __repr__(self):
-        return 'From:%5d To:%5d Type:%3d(%c) Payload:%s' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload())
+        if self.hasTime():
+            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s Sent on:%6d' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload(), self.sendTime())
+        else:
+            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload())
     def type(self):
-        return self._bytes[1]
+        return self._bytes[1] ^ self._timestampTag
+    def hasTime(self):
+        return self._bytes > 127
     def fromId(self):
         return strToId(self._bytes[2:2+Config.ID_LENGTH])
     def toId(self):
         return strToId(self._bytes[2+Config.ID_LENGTH:2+2*Config.ID_LENGTH])
     def content(self):
-        return self._bytes[2+2*Config.ID_LENGTH:-1]
+        end = -1
+        if self.hasTime():
+            end = end - 6
+        return self._bytes[2+2*Config.ID_LENGTH:end]
     def payload(self):
         return self.content()
     def isValid(self):
         return self._bytes[-1] == chr(computeCRC_8(self._bytes[:-1]))
     def timing(self):
         return self._timing
+    def sendTime(self):
+        if self.hasTime():
+            return struct.unpack('I', self._bytes[-7:-1])
+        return None
     def power(self):
         return self._power
     def payloadLength(self):
@@ -98,13 +115,17 @@ class FrameLayer:
     
     def sendFrame(self, ftype, fromId, toId, content, timing = None):
         frame = Frame()
-        frame.toSend(ftype, fromId, toId, content)
 
         if timing:
+            #This might help combat the innacuracies of the get_approx_timing() method.
+            frame.toSend(ftype, fromId, toId, content, timing)
             self.nic.timing(timing)
-        
-        return self.nic.tx(frame.bytes())
-    
+            return self.nic.tx(frame.bytes())
+        else:
+            #Since we attach the timestamp at the moment of frame creation, we want it to happen as close to actually sending the frame as possible
+            frame.toSend(ftype, fromId, toId, content, self.nic.get_approx_timing())
+            return self.nic.tx(frame.bytes())
+
     # do not use it in protocols
     def _sync(self, deadline = None):
         self.nic.sync(deadline)
