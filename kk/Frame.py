@@ -122,8 +122,11 @@ class FrameLayer:
             self.nic.timing(timing)
             return self.nic.tx(frame.bytes())
         else:
-            #Since we attach the timestamp at the moment of frame creation, we want it to happen as close to actually sending the frame as possible
-            frame.toSend(ftype, fromId, toId, content, self.nic.get_approx_timing())
+            #We definitely do not want to attach a timestamp here.
+            #Since we want this frame to be sent *now*, we don't know when exactly it will be sent
+            #and the timestamp attached must be accurate (why inaccurate timestamps?)
+            #get_approx_timing() function doesn't help here.
+            frame.toSend(ftype, fromId, toId, content, None)
             return self.nic.tx(frame.bytes())
 
     # do not use it in protocols
