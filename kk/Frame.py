@@ -53,10 +53,12 @@ class Frame(dict):
     
     def __getattr__(self, name):
         if name in Frame.ALL_FIELDS:
-            return lambda: self[name]
+            return lambda: self.get(name, None)
     
     def totalLength(self):
         return ord(self._bytes[0])
+    def payloadLength(self):
+        return len(self.payload())
     def hasTime(self):
         return ord(self._bytes[1]) > 127
     def isValid(self):

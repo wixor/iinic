@@ -32,6 +32,14 @@ class TimeManager(Proto):
         return self.frameLayer.nic.get_approx_timing() + diff + 1000
     
     def scheduleFrame(self, ftype, fromId, toId, payload, timing = None, useRounds = True): # send in first available slot after 'timing'
+        frame = Frame({
+            'ftype': ftype,
+            'fromId': fromId,
+            'toId': toId,
+            'payload': payload})
+        return self.scheduleFrame(frame, timing, useRounds)
+        
+    def scheduleWholeFrame(self, frame, timing = None, useRounds = True):
         diff = self.getNetworkTimeOffset()
         if timing is None:
             timing = self.getApproxNow() # do not send in the past!
@@ -48,7 +56,7 @@ class TimeManager(Proto):
             roundTime = self._getRoundDuration()
             sendTiming = roundTime * (int((timing+diff) / roundTime) + 1) - diff + self._getRoundOffset()
 
-        self._scheduleFrame(ftype, fromId, toId, payload, sendTiming)
+        self._scheduleFrame(frame, sendTiming)
 
     def frameReceived(self, frame):
         if frame.networkTime() is None:
@@ -79,8 +87,8 @@ class TimeManager(Proto):
             self.roundOffset = (shiftBytes + Config.DEVICE_BYTES_SILENCE_BEFORE) * self.frameLayer.get_byte_send_time() * 1000000
         return self.roundOffset
     
-    def _scheduleFrame(self, *args):
-        self.frameLayer.sendFrame(*args)
+    def _scheduleFrame(self, frame, timing):
+        self.frameLayer.sendWholeFrame(frame, timing)
         
     ## sync with card ====================================================================== ##
         
