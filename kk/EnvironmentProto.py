@@ -17,9 +17,8 @@ class EnvironmentProto(Proto):
     def handleFrame(self, frame):
         try:
             fromId = frame.fromId()
-            power = 100 # frame.power() doesn't work 
-            content = frame.content()
-            neighboursNumber = int(frame.content())
+            power = 100 # frame.power() doesn't work
+            neighboursNumber = int(frame.payload())
         except: 
             # incorrect frame - ignore it
             return
@@ -34,10 +33,9 @@ class EnvironmentProto(Proto):
         timing = timing + random.randint(0, 250000 * self.BEACON_INTERVAL)
         print '~ Sending beacon.. ', timing, '(hardware time) ~'
         # content of a frame is a number of my neighbours
-        content = str(len(self.getNeighbours()))
-        self.frameLayer.sendFrame(self.frameTypes, self.frameLayer.getMyId(), 0, content, timing)
-    
-        
+        payload = str(len(self.getNeighbours()))
+        self.frameLayer.sendFrame(self.frameTypes, self.frameLayer.getMyId(), 0, payload, timing)
+
     def getNeighbours(self):
         self.removeOldNeighbours()
         return self.__neighbours

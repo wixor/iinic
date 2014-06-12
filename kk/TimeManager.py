@@ -31,7 +31,7 @@ class TimeManager(Proto):
             diff = 700000
         return self.frameLayer.nic.get_approx_timing() + diff + 1000
     
-    def scheduleFrame(self, ftype, fromId, toId, payload, timing = None): # send in first available slot after 'timing'
+    def scheduleFrame(self, ftype, fromId, toId, payload, timing = None, useRounds = True): # send in first available slot after 'timing'
         diff = self.getNetworkTimeOffset()
         if timing is None:
             timing = self.getApproxNow() # do not send in the past!
@@ -42,12 +42,12 @@ class TimeManager(Proto):
                 log('Warning, no roundTripTime.')
                 timing += 100000
 
-        if diff is None: # not synced or other error, do not care about rounds.
+        if diff is None or not useRounds: # not synced or other error, do not care about rounds.
             sendTiming = timing
         else:
             roundTime = self._getRoundDuration()
             sendTiming = roundTime * (int((timing+diff) / roundTime) + 1) - diff + self._getRoundOffset()
-            
+
         self._scheduleFrame(ftype, fromId, toId, payload, sendTiming)
 
     def frameReceived(self, frame):
