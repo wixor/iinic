@@ -17,6 +17,7 @@ class TimeManager(Proto):
         self.approxCardTimeDiff = 100000 if Config.ON_DEVICE else 700000
         
     def handleFrame(self, frame):
+        # it doesn't handle frames
         pass
     
     def onStart(self):
@@ -24,7 +25,11 @@ class TimeManager(Proto):
         pass
     
     def getApproxNow(self):
-        return self.frameLayer.nic.get_approx_timing() + self.approxCardTimeDiff + 1000
+        try:
+            diff = self.approxCardTimeDiff
+        except:
+            diff = 700000
+        return self.frameLayer.nic.get_approx_timing() + diff + 1000
     
     def scheduleFrame(self, ftype, fromId, toId, payload, timing = None): # send in first available slot after 'timing'
         diff = self.getNetworkTimeOffset()
@@ -34,24 +39,24 @@ class TimeManager(Proto):
             try:
                 timing += self.roundTripTime
             except AttributeError:
-                print >> sys.stderr, 'Warning, no roundTripTime.'
+                log('Warning, no roundTripTime.')
                 timing += 100000
 
-        if diff is None: # not synced or other error
+        if diff is None: # not synced or other error, do not care about rounds.
             sendTiming = timing
         else:
             roundTime = self._getRoundDuration()
             sendTiming = roundTime * (int((timing+diff) / roundTime) + 1) - diff + self._getRoundOffset()
             
         self._scheduleFrame(ftype, fromId, toId, payload, sendTiming)
-    
+
     def frameReceived(self, frame):
         if frame.recvTiming() is None:
             return # nothing to do
         recvNetworkOffset = frame.recvTiming() - frame.timing()
         myNetworkOffset = self.getNetworkTimeOffset()
-        if recvNetworkOffset > (myNetworkOffset or 0) + 10:
-            print 'Changing offset, old %d, new %d' % (myNetworkOffset or 0, recvNetworkOffset)
+        if recvNetworkOffset > (myNetworkOffset or 0) + 10: # allow some tolerance
+            log('Changing offset, old %d, new %d' % (myNetworkOffset or 0, recvNetworkOffset))
             self.clockDiff = recvNetworkOffset
 
     def getNetworkTimeOffset(self):
@@ -65,13 +70,13 @@ class TimeManager(Proto):
             pow10 = 1
             while self.roundDuration > pow10*10:
                 pow10 *= 10
-            self.roundDuration = int(self.roundDuration / pow10) * pow10
-            print 'Round duration %d' % (self.roundDuration)
+            self.roundDuration = int(self.roundDuration / pow10 + 1) * pow10
+            log(sys.stderr,'Round duration %d' % (self.roundDuration))
         return self.roundDuration
 
     def _getRoundOffset(self, shiftBytes = 0):
         if 'roundOffset' not in self.__dict__:
-            self.roundOffset = 0 # TODO (shiftBytes + Config.DEVICE_BYTES_SILENCE_BEFORE) * self.frameLayer.get_byte_send_time() * 1000000
+            self.roundOffset = (shiftBytes + Config.DEVICE_BYTES_SILENCE_BEFORE) * self.frameLayer.get_byte_send_time() * 1000000
         return self.roundOffset
     
     def _scheduleFrame(self, ftype, fromId, toId, payload, timing):
@@ -97,6 +102,5 @@ class TimeManager(Proto):
         if 'roundTripTime' not in self.__dict__:
             raise OurException('Sync with card failed.')
         self.approxCardTimeDiff = self._syncPingSent - self.frameLayer.nic.get_approx_timing() + self.roundTripTime
-        print >> sys.stderr, 'Ready. Roundtrip time %d, time difference to card %d' % (self.roundTripTime, self.approxCardTimeDiff)
-            
+        log(sys.stderr, 'Ready. Roundtrip time %d, time diff between approx_time() and real time %d' % (self.roundTripTime, self.approxCardTimeDiff))
             
