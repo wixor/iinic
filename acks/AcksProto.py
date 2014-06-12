@@ -25,46 +25,44 @@ class AcksProto(Proto):
 
   FRAME_TIMEOUT = 1
 
-  def __init__(self, fromId, frameLayer, UIDProvider):
+  def __init__(self, UIDProvider):
     Proto.__init__(self)
-
-    self._fromId = fromId
-    self._frameLayer = frameLayer
     self._deferreds = {}
     self._UIDProvider = UIDProvider
+
+  def onStart(self):
+      self._fromId = self.frameLayer.getMyId()
     
   def handleFrame(self, frame):
     ackFrame = AckFrame()
     ackFrame.fromFrame(frame)
 
-    if ackFrame.isData()
-      ackFrame.confirmation()
-      self._frameLayer.sendFrame(confirmationFrame.type(), 
-                                 self._fromId, 
-                                 confirmationFrame.toId(), 
-                                 confirmationFrame.bytes())
-    elif self.isConfirmation()
-      uniqueID = ackFrame.uniqueID()
+    if ackFrame.isData():
+      conf = ackFrame.confirmation()
+      self.frameLayer.sendWholeFrame(conf)
+
+    elif self.isConfirmation():
+      uniqueID = ackFrame.uniqueID
       toId = ackFrame.fromId()
 
       self._deferreds[toId][uniqueID].resolve(time.time())
       self._deferreds[toId][uniqueID] = None
 
     # TODO: Make possible to fail ack frame
+    # TODO: Handle data :)
       
   def sendFrame(self, toId, message):
     ackFrame = AckFrame()
-
-    ackFrame.setUniqueID(self._UIDProvider.UIDFor(toId))
-    ackFrame.toSend(self._fromId, toId, message)
-
-    self._frameLayer.sendFrame(ackFrame.type(),
-                               ackFrame.fromId(),
-                               ackFrame.toId()
-                               ackFrame.bytes())
+    ackFrame.toSend(self._UIDProvider.UIDFor(toId), {
+        'ftype': FRAME_TYPE_TO_ACK,
+        'fromId': self._fromId,
+        'toId': toId,
+        'payload': message})
+    
+    self.frameLayer.sendWholeFrame(ackFrame)
 
     if self._deferreds.get(toId) == None:
       self._deferreds[toId] = {}
 
-    self._deferreds[toId][ackFrame.uniqueID()] = AckDeferred(ackFrame)
-    return self._deferreds[toId][ackFrame.uniqueID()].promise()
+    self._deferreds[toId][ackFrame.uniqueID] = AckDeferred(ackFrame)
+    return self._deferreds[toId][ackFrame.uniqueID].promise()
