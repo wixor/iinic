@@ -51,9 +51,9 @@ class TimeManager(Proto):
         self._scheduleFrame(ftype, fromId, toId, payload, sendTiming)
 
     def frameReceived(self, frame):
-        if frame.recvTiming() is None:
+        if frame.networkTime() is None:
             return # nothing to do
-        recvNetworkOffset = frame.recvTiming() - frame.timing()
+        recvNetworkOffset = frame.networkTime() - frame.timing()
         myNetworkOffset = self.getNetworkTimeOffset()
         if recvNetworkOffset > (myNetworkOffset or 0) + 10: # allow some tolerance
             log('Changing offset, old %d, new %d' % (myNetworkOffset or 0, recvNetworkOffset))
@@ -71,7 +71,7 @@ class TimeManager(Proto):
             while self.roundDuration > pow10*10:
                 pow10 *= 10
             self.roundDuration = int(self.roundDuration / pow10 + 1) * pow10
-            log(sys.stderr,'Round duration %d' % (self.roundDuration))
+            log('Round duration %d' % (self.roundDuration))
         return self.roundDuration
 
     def _getRoundOffset(self, shiftBytes = 0):
@@ -79,8 +79,8 @@ class TimeManager(Proto):
             self.roundOffset = (shiftBytes + Config.DEVICE_BYTES_SILENCE_BEFORE) * self.frameLayer.get_byte_send_time() * 1000000
         return self.roundOffset
     
-    def _scheduleFrame(self, ftype, fromId, toId, payload, timing):
-        self.frameLayer.sendFrame(ftype, fromId, toId, payload, timing)
+    def _scheduleFrame(self, *args):
+        self.frameLayer.sendFrame(*args)
         
     ## sync with card ====================================================================== ##
         
@@ -102,5 +102,5 @@ class TimeManager(Proto):
         if 'roundTripTime' not in self.__dict__:
             raise OurException('Sync with card failed.')
         self.approxCardTimeDiff = self._syncPingSent - self.frameLayer.nic.get_approx_timing() + self.roundTripTime
-        log(sys.stderr, 'Ready. Roundtrip time %d, time diff between approx_time() and real time %d' % (self.roundTripTime, self.approxCardTimeDiff))
+        log('Ready. Roundtrip time %d, time diff between approx_time() and real time %d' % (self.roundTripTime, self.approxCardTimeDiff))
             

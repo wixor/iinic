@@ -53,7 +53,7 @@ class Dispatcher:
             else:
                 frame = self.frameLayer.receiveFrame(timing) # blocks until 'timing' has passed or a frame arrives
                 if frame:
-                    ftype = frame.type()
+                    ftype = frame.ftype()
                     if ftype in self.typeToProto:
                         for proto in self.typeToProto[ftype]:
                             proto.handleFrame(frame)

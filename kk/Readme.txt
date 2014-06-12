@@ -32,7 +32,7 @@ Ten plik eksportuje dwie klasy:
         zwraca wszystkie bajty ramki
     - __repr__():
         tworzy czytelną reprezentację ramki
-    - type(), fromId(), toId(), content(), power(), timing(), payloadLength()
+    - ftype(), fromId(), toId(), payload(), power(), timing(), payloadLength()
         metody zwracające odpowiednie wartości - nie wymagają komentarza ;)
 * FrameLayer
     Klasa odpowiadająca za pierwszą warstwę, czyli odbieranie i wysyłanie ramek. Docelowo będzie

@@ -30,7 +30,7 @@ class PingPongProto(Proto):
         if frame.toId() != 0 and frame.toId() != self.frameLayer.getMyId():
             return
         
-        received = frame.content()
+        received = frame.payload()
         try:
             nr = int(received[5:9])
         except ValueError:
@@ -44,7 +44,7 @@ class PingPongProto(Proto):
         else:
             return # drop frame
         
-        print 'Received %s with timing %d, expected at %d' % (received, frame.recvTiming(), frame.timing() + self.timeManager.getNetworkTimeOffset())
+        print 'Received %s with timing %d, expected at %d' % (received, frame.networkTime(), frame.timing() + (self.timeManager.getNetworkTimeOffset() or 0))
         
         content = '%s %4d' % (what, nr+1)
         # schedule a reply one second after

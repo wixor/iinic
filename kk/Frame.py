@@ -21,71 +21,84 @@ def idToStr(i):
 def strToId(s):
     return struct.unpack('H', s)[0]
 
-class Frame:
+class Frame(dict):
+    MANDATORY_FIELDS = ['ftype', 'fromId', 'toId', 'payload']
+    ALL_FIELDS = MANDATORY_FIELDS + ['networkTime']
+    
     @staticmethod
     def lengthOverhead():
         return 2*Config.ID_LENGTH + 1 + 1 + 1
     
-    def __init__(self):
-        pass
+    def __init__(self, fields = {}):
+        dict.__init__(self, fields)
 
     def fromReceived(self, msg, firstTiming, power):
+        length = ord(msg[0]) + Frame.lengthOverhead()
+        if len(msg) < length:
+            return False
+       
         self._bytes = msg
         self._timing = firstTiming
         self._power = power
+        
+        self['ftype'] = chr(ord(self._bytes[1]) & 127)
+        self['fromId'] = strToId(self._bytes[2:2+Config.ID_LENGTH])
+        self['toId'] = strToId(self._bytes[2+Config.ID_LENGTH:2+2*Config.ID_LENGTH])
+        end = -1
+        if self.hasTime():
+            end = end - 8
+        self['payload'] = self._bytes[2+2*Config.ID_LENGTH:end]
+        self['networkTime'] = struct.unpack('Q', self._bytes[-9:-1])[0] if self.hasTime() else None
+        return self.isValid()
+    
+    def __getattr__(self, name):
+        if name in Frame.ALL_FIELDS:
+            return lambda: self[name]
+    
+    def totalLength(self):
+        return ord(self._bytes[0])
+    def hasTime(self):
+        return ord(self._bytes[1]) > 127
+    def isValid(self):
+        return self._bytes[-1] == chr(computeCRC_8(self._bytes[:-1]))
+    def timing(self):
+        return self._timing        
+    def power(self):
+        return self._power
 
-    def toSend(self, ftype, fromId, toId, payload, timingIncluded=None):
-        payload = str(payload)
-        l = len(payload)
+    def toSend(self):
+        for f in Frame.MANDATORY_FIELDS:
+            if f not in self:
+                raise OurException('Field %s is mandatory' % f)
+        payload = str(self.payload())
+        l = len(self.payload())
         
         if l > 255:
             raise OurException('Frame payload too long, maximum is 255')
         
-        if l > 255 - 8 or timingIncluded == None: # We attach the timestamp to any frame we can.
+        networkTime = self.networkTime()
+        
+        if l > 255 - 8 or networkTime == None: # We attach the timestamp to any frame we can.
             self._timestampTag = 0
         else:
             self._timestampTag=128 # TODO: ?
             l += 8
             
-        self._bytes = chr(l) + chr(self._timestampTag ^ ord(ftype)) + idToStr(fromId) + idToStr(toId) + payload
+        string = chr(l) + chr(self._timestampTag ^ ord(self.ftype())) + idToStr(self.fromId()) + idToStr(self.toId()) + self.payload()
         if self._timestampTag > 0:
-            self._bytes += struct.pack('Q', timingIncluded) # 8 bytes
-        self._bytes += chr(computeCRC_8(self._bytes))
+            string += struct.pack('Q', networkTime) # 8 bytes
+        string += chr(computeCRC_8(string))
+        self._bytes = string
+        return string
 
     def bytes(self):
         return self._bytes
     def __repr__(self):
         if self.hasTime():
-            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s Included timing:%6d' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload(), self.recvTiming())
+            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s Included timing:%6d' % (self.fromId(), self.toId(), ord(self.ftype()), self.ftype(), self.payload(), self.networkTime())
         else:
-            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload())
-    def type(self): # without timestamp tag
-        return chr(ord(self._bytes[1]) & 127)
-    def hasTime(self):
-        return ord(self._bytes[1]) > 127
-    def fromId(self):
-        return strToId(self._bytes[2:2+Config.ID_LENGTH])
-    def toId(self):
-        return strToId(self._bytes[2+Config.ID_LENGTH:2+2*Config.ID_LENGTH])
-    def content(self):
-        end = -1
-        if self.hasTime():
-            end = end - 8
-        return self._bytes[2+2*Config.ID_LENGTH:end]
-    def payload(self):
-        return self.content()
-    def isValid(self):
-        return self._bytes[-1] == chr(computeCRC_8(self._bytes[:-1]))
-    def timing(self):
-        return self._timing
-    def recvTiming(self):
-        return struct.unpack('Q', self._bytes[-9:-1])[0] if self.hasTime() else None
-    def power(self):
-        return self._power
-    def payloadLength(self):
-        return self.totalLength() - (8 if self.hasTime() else 0)
-    def totalLength(self):
-        return ord(self._bytes[0])
+            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s' % (self.fromId(), self.toId(), ord(self.ftype()), self.ftype(), self.payload())
+    
 
 class FrameLayer:
     def __init__(self, nic, myId = None):
@@ -99,7 +112,6 @@ class FrameLayer:
         except:
             return 0
         
-
     def getMyId(self):
         return self.myId
 
@@ -107,22 +119,13 @@ class FrameLayer:
         rxbytes = self.nic.rx(deadline)
         if not rxbytes:
             return None
-        
-        length = ord(rxbytes.bytes[0]) + Frame.lengthOverhead()
-        if len(rxbytes.bytes) < length:
-            return None
-       
+
         frame = Frame()
-        frame.fromReceived(rxbytes.bytes[0:length], int(rxbytes.timing-5000000.0*self.get_byte_send_time()), rxbytes.rssi)
-
-        if not frame.isValid():
+        if not frame.fromReceived(rxbytes.bytes, int(rxbytes.timing-5000000.0*self.get_byte_send_time()), rxbytes.rssi):
             return None
         
-        try:
-            self.timeManager.frameReceived(frame)
-        except OurException as e:
-            print >> sys.stderr, 'Warning, exception %s' % e
-
+        self.timeManager.frameReceived(frame)
+        
         return frame
 
     def receiveFrame(self, deadline = None):
@@ -131,31 +134,29 @@ class FrameLayer:
             if frame:
                 return frame
         return None
-    
-    def sendFrame(self, ftype, fromId, toId, content, timing = None):
-        frame = Frame()
 
+    def sendWholeFrame(self, frame, timing = None):
         if timing:
             #This might help combat the innacuracies of the get_approx_timing() method.
-            includeTiming = timing + self.getNetworkTimeOffset()
-            frame.toSend(ftype, fromId, toId, content, includeTiming)
+            frame['networkTime'] = timing + self.getNetworkTimeOffset()
             self.nic.timing(timing)
-            return self.nic.tx(frame.bytes())
+            return self.nic.tx(frame.toSend())
         else:
-            #We definitely do not want to attach a timestamp here.
-            #Since we want this frame to be sent *now*, we don't know when exactly it will be sent
-            #and the timestamp attached must be accurate (why inaccurate timestamps?)
-            #get_approx_timing() function doesn't help here.
-            frame.toSend(ftype, fromId, toId, content, None)
-            return self.nic.tx(frame.bytes())
+            return self.nic.tx(frame.toSend())
+        
+    def sendFrame(self, ftype, fromId, toId, payload, timing = None):
+        frame = Frame({'ftype':ftype, 'fromId':fromId, 'toId':toId, 'payload':payload})
+        return self.sendWholeFrame(frame, timing)
 
     # do not use it in protocols
     def _sync(self, deadline = None):
         self.nic.sync(deadline)
         
+    # advanced
     def set_bitrate(self, bitrate):
         self.nic.set_bitrate(bitrate)
         
+    # advanced
     def set_channel(self, channel):
         self.nic.set_channel(channel)
         
