@@ -18,7 +18,7 @@ def main(mode):
     frameType = 'b'
         
     if mode == '1':
-        frameLayer.sendFrame(frameType, frameLayer.getMyId(), 0, '')
+        frameLayer.sendFrame(frameType, frameLayer.getMyId(), 0, '0')
    
     elif mode == '2':
         environmentProto = EnvironmentProto(frameType)
