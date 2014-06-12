@@ -183,3 +183,25 @@ funkcjach _gotSynced oraz _lostSync.
         powodować niepotrzebnych kolizji)
     * automatyczną dedukcję struktury rund z istniejącej komunikacji (np wiedząc, że wszystkie
         ramki zostaną wysłane na początku jakiejś rundy)
+        
++++ EnvironmentProto.py +++
+
+Prosta implementacja otoczenia sieciowego. 
+Co ustalony czas wysyłamy w eter beacona. 
+Każdy z członków sieci trzyma listę sąsiadów w postaci:
+    (id_sasiada, time, power, neighboursNumber)
+     - time - kiedy dostalismy beacona
+     - power - moc sygnału
+     - neighboursNumber - ile sąsiadów ma gość, który wysłał nam beacona (informacja wszyta w content)
+
+Protokół w konstruktorze przyjmuje typ ramki, jaki mają mieć wysyłane beacony.
+
++++ EnvironmentTest.py +++
+Przykład zastosowania protokołu otoczenia sieciowego.
+Test można uruchomić z parametrem '1' lub '2'
+ - '1' - wysyłamy jednego beacona w eter i wyłączamy się
+ - '2' - w pętli wysyłamy co ustalony czas beacony i wypisujemy wykrytych sąsiadów
+
+
+
+
