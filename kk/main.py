@@ -6,6 +6,7 @@ from .. import iinic
 from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
+from KeepAlive import KeepAlive
 from PingPongProto import PingPongProto
 from MonitorProto import MonitorProto
 import Config
@@ -35,7 +36,11 @@ def main(mode):
     myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     dispatcher = Dispatcher(frameLayer)
-    
+    if mode == 'k':
+        keepalive = KeepAlive()
+        dispatcher.registerProto(keepalive, 'keepalive')
+        dispatcher.loop()
+
     if mode == 'd':
         sample = SampleProto()
         dispatcher.registerProto(sample, 'sample')
@@ -65,7 +70,7 @@ def main(mode):
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        print 'Usage:', sys.argv[0], '[r|s|d]'
+        print 'Usage:', sys.argv[0], '[r|s|d|k]'
         sys.exit(1)
         
     main(sys.argv[1])
