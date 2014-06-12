@@ -34,29 +34,35 @@ class Frame:
         self._timing = firstTiming
         self._power = power
 
-    def toSend(self, ftype, fromId, toId, payload, timing=None):
+    def toSend(self, ftype, fromId, toId, payload, timingIncluded=None):
+        payload = str(payload)
         l = len(payload)
-        self._timestampTag=0b10000000
+        
         if l > 255:
             raise OurException('Frame payload too long, maximum is 255')
-        if l > 255 - 6 or timing == None: # We attach the timestamp to any frame we can.
+        
+        if l > 255 - 8 or timingIncluded == None: # We attach the timestamp to any frame we can.
             self._timestampTag = 0
+        else:
+            self._timestampTag=128 # TODO: ?
+            l += 8
+            
         self._bytes = chr(l) + chr(self._timestampTag ^ ord(ftype)) + idToStr(fromId) + idToStr(toId) + payload
         if self._timestampTag > 0:
-            self._bytes += struct.pack('I', timing)
+            self._bytes += struct.pack('Q', timingIncluded) # 8 bytes
         self._bytes += chr(computeCRC_8(self._bytes))
 
     def bytes(self):
         return self._bytes
     def __repr__(self):
         if self.hasTime():
-            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s Sent on:%6d' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload(), self.sendTime())
+            return 'From:%5d To:%5d Type:%3d(%c) Payload:%s Included timing:%6d' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload(), self.recvTiming())
         else:
             return 'From:%5d To:%5d Type:%3d(%c) Payload:%s' % (self.fromId(), self.toId(), ord(self.type()), self.type(), self.payload())
-    def type(self):
-        return self._bytes[1] ^ self._timestampTag
+    def type(self): # without timestamp tag
+        return chr(ord(self._bytes[1]) & 127)
     def hasTime(self):
-        return self._bytes > 127
+        return ord(self._bytes[1]) > 127
     def fromId(self):
         return strToId(self._bytes[2:2+Config.ID_LENGTH])
     def toId(self):
@@ -64,7 +70,7 @@ class Frame:
     def content(self):
         end = -1
         if self.hasTime():
-            end = end - 6
+            end = end - 8
         return self._bytes[2+2*Config.ID_LENGTH:end]
     def payload(self):
         return self.content()
@@ -72,19 +78,27 @@ class Frame:
         return self._bytes[-1] == chr(computeCRC_8(self._bytes[:-1]))
     def timing(self):
         return self._timing
-    def sendTime(self):
-        if self.hasTime():
-            return struct.unpack('I', self._bytes[-7:-1])
-        return None
+    def recvTiming(self):
+        return struct.unpack('Q', self._bytes[-9:-1])[0] if self.hasTime() else None
     def power(self):
         return self._power
     def payloadLength(self):
+        return self.totalLength() - (8 if self.hasTime() else 0)
+    def totalLength(self):
         return ord(self._bytes[0])
 
 class FrameLayer:
     def __init__(self, nic, myId = None):
         self.nic = nic
         self.myId = myId or self.nic.get_uniq_id()
+        
+    def getNetworkTimeOffset(self):
+        try:
+            diff = self.timeManager.getNetworkTimeOffset()
+            return diff or 0
+        except:
+            return 0
+        
 
     def getMyId(self):
         return self.myId
@@ -100,10 +114,15 @@ class FrameLayer:
        
         frame = Frame()
         frame.fromReceived(rxbytes.bytes[0:length], int(rxbytes.timing-5000000.0*self.get_byte_send_time()), rxbytes.rssi)
-        # -5000000.0*self.get_byte_send_time()
+
         if not frame.isValid():
             return None
         
+        try:
+            self.timeManager.frameReceived(frame)
+        except OurException as e:
+            print >> sys.stderr, 'Warning, exception %s' % e
+
         return frame
 
     def receiveFrame(self, deadline = None):
@@ -118,7 +137,8 @@ class FrameLayer:
 
         if timing:
             #This might help combat the innacuracies of the get_approx_timing() method.
-            frame.toSend(ftype, fromId, toId, content, timing)
+            includeTiming = timing + self.getNetworkTimeOffset()
+            frame.toSend(ftype, fromId, toId, content, includeTiming)
             self.nic.timing(timing)
             return self.nic.tx(frame.bytes())
         else:

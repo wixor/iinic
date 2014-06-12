@@ -15,6 +15,7 @@ class Proto:
     def doRegistration(self, dispatcher):
         self.dispatcher = dispatcher
         self.frameLayer = dispatcher.frameLayer
+        self.timeManager = dispatcher.timeManager
         
     # implement this
     def onStart(self):

@@ -16,13 +16,10 @@ class PingPongProto(Proto):
     def onStart(self):
         self.dispatcher.scheduleCallback(self.initPing, time.time()+self.INIT_RETRY+1.0) # listen for some time
     
-    def _constructFrame(self, PingOrPong, nr, t):
-        return '%s %04d %012d' % (PingOrPong, nr, t)
-    
     def initPing(self):
         if not self.lastReceived or time.time()-self.lastReceived > self.DROP_GAME:
             timing = self.frameLayer.nic.get_approx_timing() + 1000000
-            self.lastPing = self.frameLayer.sendFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=0, content=self._constructFrame('Ping', 1, timing), timing=timing)
+            self.lastPing = self.timeManager.scheduleFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=0, payload='Ping 1', timing=timing)
             self.dispatcher.scheduleCallback(self.initPing, time.time() + self.INIT_RETRY + 0.69) # retry in some time
         
     def handleFrame(self, frame):
@@ -36,7 +33,6 @@ class PingPongProto(Proto):
         received = frame.content()
         try:
             nr = int(received[5:9])
-            t = int(received[10:22])
         except ValueError:
             print 'Drop frame ', received
             return
@@ -48,12 +44,10 @@ class PingPongProto(Proto):
         else:
             return # drop frame
         
-        # print 'Received: Timing: %012d' % (int(frame.timing())), frame
-        diff = frame.timing()-t if what == 'Ping' else 0
+        print 'Received %s with timing %d, expected at %d' % (received, frame.recvTiming(), frame.timing() + self.timeManager.getNetworkTimeOffset())
         
-        willSend = frame.timing()+1000000
-        content = self._constructFrame(what, nr+1, willSend-diff)
+        content = '%s %4d' % (what, nr+1)
         # schedule a reply one second after
         self.lastReceived = time.time()
-        self.lastPing = self.frameLayer.sendFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=frame.fromId(), content=content, timing=willSend)
+        self.lastPing = self.timeManager.scheduleFrame(ftype='p', fromId=self.frameLayer.getMyId(), toId=frame.fromId(), payload=content, timing=frame.timing()+1000000)
         self.dispatcher.scheduleCallback(self.initPing, time.time()+self.DROP_GAME+0.1)

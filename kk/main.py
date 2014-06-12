@@ -10,11 +10,15 @@ from PingPongProto import PingPongProto
 from MonitorProto import MonitorProto
 from TimeSyncProto import TimeSyncProto
 from SendingProto import SendingProto
+from TimeManager import TimeManager
+from OurException import OurException
+from EnvironmentProto import EnvironmentProto
 
 import Config
 
 def sampleCallback():
-    print 'This is sample callback, now is', time.time()
+    pass
+    # print 'This is sample callback, now is', time.time()
 
 class SampleProto(Proto):
     frameTypes = 's'
@@ -37,9 +41,11 @@ def main(mode, device=None, send_interval=1000000, send_payload='blah'):
     frameLayer = FrameLayer(nic)
     myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
-    dispatcher = Dispatcher(frameLayer)
+    timeManager = TimeManager()
+    dispatcher = Dispatcher(frameLayer, timeManager)
     
-    if mode == 'd':
+    
+    if mode == 'p':
         sample = SampleProto()
         dispatcher.registerProto(sample, 'sample')
         
@@ -48,7 +54,7 @@ def main(mode, device=None, send_interval=1000000, send_payload='blah'):
         
         try:
             dispatcher.registerProto(sample, 'sample')
-        except:
+        except OurException:
             pass # yes, we expected you, Mr. Exception
         
         dispatcher.scheduleCallback(sample.sampleCallback, time.time()+1)
@@ -70,13 +76,18 @@ def main(mode, device=None, send_interval=1000000, send_payload='blah'):
         sync = TimeSyncProto()
         dispatcher.registerProto(sync, 'sync')
         dispatcher.loop()
+        
+    elif mode == 'e':
+        env = EnvironmentProto('e')
+        dispatcher.registerProto(env, 'env')
+        dispatcher.loop()
 
     else:
         print 'Invalid mode', mode
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        print 'Usage:', sys.argv[0], '[r|s|d|t]'
+        print 'Usage:', sys.argv[0], '[r|s|p|t|e]'
         sys.exit(1)
         
     main(sys.argv[1])

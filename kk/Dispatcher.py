@@ -5,26 +5,31 @@ from Frame import Frame, FrameLayer
 from OurException import OurException
 
 class Dispatcher:
-    def __init__(self, frameLayer):
+    def __init__(self, frameLayer, timeManager):
         self.typeToProto = defaultdict(lambda: [])
         self.nameToProto = {}
         self.callbacks = []
         self.frameLayer = frameLayer
+        self.timeManager = timeManager
+        frameLayer.dispatcher = self
+        frameLayer.timeManager = timeManager
+        timeManager.dispatcher = self
+        self.registerProto(timeManager, 'timeManager')
         
     def registerProto(self, proto, name):
         if name in self.nameToProto:
             raise OurException('This protocol name has been already taken')
-        
+
         # proto is valid
         for t in proto.frameTypes:
             self.typeToProto[t].append(proto)
         self.nameToProto[name] = proto
-        
+
         proto.doRegistration(self)
 
     def getProtoByName(self, name):
         return self.nameToProto[name]
-
+    
     def scheduleCallback(self, callback, timing):
         self.callbacks += [(callback, timing)]
         
@@ -53,4 +58,4 @@ class Dispatcher:
                         for proto in self.typeToProto[ftype]:
                             proto.handleFrame(frame)
                     else:
-                        print >> sys.stderr, 'Cannot dispatch frame', frame
+                        pass # print >> sys.stderr, 'Cannot dispatch frame', frame
