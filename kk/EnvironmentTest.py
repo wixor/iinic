@@ -5,6 +5,7 @@ from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
 from EnvironmentProto import EnvironmentProto
+from TimeManager import TimeManager
 from .. import iinic
 import Config
 
@@ -12,8 +13,9 @@ def main(mode):
     comm = iinic.USBComm() if Config.ON_DEVICE else iinic.NetComm()
     nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
+    timeManager = TimeManager()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
-    dispatcher = Dispatcher(frameLayer)
+    dispatcher = Dispatcher(frameLayer, timeManager)
     
     frameType = 'b'
         
