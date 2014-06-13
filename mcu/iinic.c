@@ -227,7 +227,7 @@ ISR(INT0_vect, ISR_NAKED)
         "sts  radio_irq+6, r25\n\t"
 
         "in   r25, 0x3b\n\t" // GICR
-        "cbr  r25, 6\n\t" // INT0
+        "andi  r25, 0xBF\n\t" // INT0
         "out  0x3b, r25\n\t" // GICR
 
         "out  __SREG__, r24\n\t"
