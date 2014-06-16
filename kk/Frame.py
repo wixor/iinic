@@ -78,7 +78,7 @@ class Frame(dict):
         if l > 255:
             raise OurException('Frame payload too long, maximum is 255')
         
-        networkTime = self.networkTime()
+        networkTime = self['networkTime']
         
         if l > 255 - 8 or networkTime == None: # We attach the timestamp to any frame we can.
             self._timestampTag = 0
