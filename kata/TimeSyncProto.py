@@ -54,11 +54,12 @@ class TimeSyncProto(Proto):
 
     def _sendSyncRequest(self):
         frame = Frame()
-        timing = self.getApproxNow() + 100000*random.uniform(1, 4)
+        timing = self.getApproxNow() + 100000
         log('Sending sync req frame at local time %d (network %d)' % (timing, self._localToNetwork(timing)))
         self.frameLayer.sendFrame(ftype='s', fromId=self.frameLayer.getMyId(), toId=0, payload='req', timing=timing)
 
     def _sendSyncResponse(self):
+        #TODO: We'd like to send this in an appropriate round
         frame = Frame()
         timing = self.getApproxNow() + 100000*random.uniform(1, 4)
         log('Sending sync resp frame at local time %d (network %d)' % (timing, self._localToNetwork(timing)))
