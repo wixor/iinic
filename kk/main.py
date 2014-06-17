@@ -13,6 +13,7 @@ from SendingProto import SendingProto
 from TimeManager import TimeManager
 from OurException import OurException
 from EnvironmentProto import EnvironmentProto
+from ..kata.RoundProvider import RoundProvider
 
 import Config
 
@@ -42,7 +43,8 @@ def main(mode, device=None, send_interval=1000000, send_payload='blah'):
     myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     timeManager = TimeManager()
-    dispatcher = Dispatcher(frameLayer, timeManager)
+    rp = RoundProvider()
+    dispatcher = Dispatcher(frameLayer, timeManager, rp)
     
     
     if mode == 'p':

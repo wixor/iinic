@@ -5,15 +5,18 @@ from Frame import Frame, FrameLayer
 from OurException import OurException
 
 class Dispatcher:
-    def __init__(self, frameLayer, timeManager):
+    def __init__(self, frameLayer, timeManager, roundProvider):
         self.typeToProto = defaultdict(lambda: [])
         self.nameToProto = {}
         self.callbacks = []
         self.frameLayer = frameLayer
         self.timeManager = timeManager
+        self.roundProvider = roundProvider
         frameLayer.dispatcher = self
         frameLayer.timeManager = timeManager
         timeManager.dispatcher = self
+        roundProvider.dispatcher = self
+        roundProvider.timeManager = timeManager
         self.registerProto(timeManager, 'timeManager')
         
     def registerProto(self, proto, name):

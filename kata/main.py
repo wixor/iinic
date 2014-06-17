@@ -9,9 +9,10 @@ from ..kk.Dispatcher import Dispatcher
 from ..kk.PingPongProto import PingPongProto
 from ..kk.MonitorProto import MonitorProto
 from TimeSyncProto import TimeSyncProto
-from ..kk.SendingProto import SendingProto
+from SP import SP
 
 import Config
+from RoundProvider import RoundProvider
 
 def main(device=None, send_interval=1000000, send_payload='blah'):
     comm = iinic.USBComm(device) if Config.ON_DEVICE else iinic.NetComm()
@@ -20,10 +21,12 @@ def main(device=None, send_interval=1000000, send_payload='blah'):
     myId = frameLayer.getMyId()
     print >> sys.stderr, 'NIC initialized. My id is', frameLayer.getMyId()
     ts = TimeSyncProto()
-    dispatcher = Dispatcher(frameLayer, ts)
+    rp = RoundProvider()
+    sp = SP()
+    dispatcher = Dispatcher(frameLayer, ts, rp)
+    dispatcher.registerProto(sp, 'sp')
     
     dispatcher.loop()
-    
 
 if __name__ == '__main__':
     main()
