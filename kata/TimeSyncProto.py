@@ -67,28 +67,32 @@ class TimeSyncProto(Proto):
 
     def _changeState(self, newState):
         self.state = newState
+        if newState == State.SYNCED:
+            for callback in self.callOnSyncList:
+                callback()
+            self.callOnSyncList = []
 
     def _progressState(self):
         if self.state==State.PREPARING:
             log('Started listening for traffic')
-            self.state=State.WAITING_FOR_TRAFFIC_ANY
+            self._changeState(State.WAITING_FOR_TRAFFIC_ANY)
             self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_TRAFFIC*self._approxRoundDuration())
             return
         if self.state==State.WAITING_FOR_TRAFFIC_ANY:
             if self.heardTraffic:
                 log('Listening for traffic a ltittle longer')
-                self.state=State.WAITING_FOR_TRAFFIC_EXTENDED
+                self._changeState(State.WAITING_FOR_TRAFFIC_EXTENDED)
                 self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_STAMPED_TRAFFIC*self._approxRoundDuration())
             else:
                 log('Sending a sync frame and waiting for a response')
                 self._sendSyncRequest()
-                self.state=State.WAITING_FOR_RESPONSE
+                self._changeState(State.WAITING_FOR_RESPONSE)
                 self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self._approxRoundDuration())
             return
         if self.state==State.WAITING_FOR_TRAFFIC_EXTENDED:
             log('Sending a sync frame and waiting for a response')
             self._sendSyncRequest()
-            self.state=State.WAITING_FOR_RESPONSE
+            self._changeState(State.WAITING_FOR_RESPONSE)
             self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self._approxRoundDuration())
             return
         if self.state==State.WAITING_FOR_RESPONSE:
@@ -99,7 +103,7 @@ class TimeSyncProto(Proto):
                 self.RETRIES+=1
                 return
             log('synced')
-            self.state=State.SYNCED
+            self._changeState(State.SYNCED)
         if self.state==State.SYNCED:
             pass
         
@@ -113,6 +117,10 @@ class TimeSyncProto(Proto):
         Proto.__init__(self)
         self.offsetFromLocalTime = 0
         self.approxCardTimeDiff = 100000 if Config.ON_DEVICE else 700000
+        self.callOnSyncList = []
+
+    def callOnSync(self, callback):
+        self.callOnSyncList.append(callback)
 
     def onStart(self):
         self._changeState(State.PREPARING)
@@ -127,6 +135,9 @@ class TimeSyncProto(Proto):
     
     def getNetworkTimeOffset(self):
         return self.offsetFromLocalTime
+
+    def synced(self):
+        return self.state == State.SYNCED
 
     def frameReceived(self, frame):
         self.heardTraffic = True #We're not alone on the network
@@ -152,4 +163,4 @@ class TimeSyncProto(Proto):
             delta = sendTime - recvTime
             log('Timing recieved from older node %d, updating by %d' % (frame['fromId'], delta))
             self.offsetFromLocalTime += delta
-            self.state=State.SYNCED
+            self._changeState(State.SYNCED)
