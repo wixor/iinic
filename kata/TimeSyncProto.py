@@ -37,11 +37,6 @@ class TimeSyncProto(Proto):
     def _localToNetwork(self, timing):
         return timing + self.offsetFromLocalTime
     
-    def _approxRoundDuration(self): 
-        if 'roundDuration' not in self.__dict__:
-            self.roundDuration = (255.0 + 10.0 + Frame.lengthOverhead()) * self.frameLayer.get_byte_send_time()
-        return self.roundDuration
-    
     def _computeBackoff(self, index):
         return 2**index
 
@@ -76,30 +71,30 @@ class TimeSyncProto(Proto):
         if self.state==State.PREPARING:
             log('Started listening for traffic')
             self._changeState(State.WAITING_FOR_TRAFFIC_ANY)
-            self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_TRAFFIC*self._approxRoundDuration())
+            self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_TRAFFIC*self.dispatcher.roundProvider.getRoundDuration()/1000000.0)
             return
         if self.state==State.WAITING_FOR_TRAFFIC_ANY:
             if self.heardTraffic:
                 log('Listening for traffic a ltittle longer')
                 self._changeState(State.WAITING_FOR_TRAFFIC_EXTENDED)
-                self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_STAMPED_TRAFFIC*self._approxRoundDuration())
+                self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_STAMPED_TRAFFIC*self.dispatcher.roundProvider.getRoundDuration()/1000000.0)
             else:
                 log('Sending a sync frame and waiting for a response')
                 self._sendSyncRequest()
                 self._changeState(State.WAITING_FOR_RESPONSE)
-                self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self._approxRoundDuration())
+                self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self.dispatcher.roundProvider.getRoundDuration()/1000000.0)
             return
         if self.state==State.WAITING_FOR_TRAFFIC_EXTENDED:
             log('Sending a sync frame and waiting for a response')
             self._sendSyncRequest()
             self._changeState(State.WAITING_FOR_RESPONSE)
-            self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self._approxRoundDuration())
+            self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self.dispatcher.roundProvider.getRoundDuration()/1000000.0)
             return
         if self.state==State.WAITING_FOR_RESPONSE:
             if self.RETRIES < self.MAX_RETRIES:
                 log('Retrying time request')
                 self._sendSyncRequest()
-                self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self._approxRoundDuration()*self._computeBackoff(self.RETRIES))
+                self.dispatcher.scheduleCallback(self._progressState, time.time()+self.LISTEN_FOR_RESPONSE*self.dispatcher.roundProvider.getRoundDuration()*self._computeBackoff(self.RETRIES)/1000000.0)
                 self.RETRIES+=1
                 return
             log('synced')
