@@ -27,10 +27,10 @@ class TimeSyncProto(Proto):
     RETRIES = 0
     
     frameTypes = ''
-    roundProtoName = None # TODO: communicate with round protocol
-
     heardTraffic = False
     offsetFromLocalTime = 0
+
+    syncResponseRequests = set()
     
     ## helper functions ##
 
@@ -53,12 +53,18 @@ class TimeSyncProto(Proto):
         log('Sending sync req frame at local time %d (network %d)' % (timing, self._localToNetwork(timing)))
         self.frameLayer.sendFrame(ftype='s', fromId=self.frameLayer.getMyId(), toId=0, payload='req', timing=timing)
 
-    def _sendSyncResponse(self):
-        #TODO: We'd like to send this in an appropriate round
-        frame = Frame()
-        timing = self.getApproxNow() + 100000*random.uniform(1, 4)
-        log('Sending sync resp frame at local time %d (network %d)' % (timing, self._localToNetwork(timing)))
-        self.frameLayer.sendFrame(ftype='s', fromId=self.frameLayer.getMyId(), toId=0, payload='resp', timing=timing)
+    def _sendSyncResponse(self, sourceId):
+        if not sourceId in self.syncResponseRequests:
+            return
+        self.syncResponseRequests.remove(sourceId)
+        frame = Frame({
+            'ftype': 's',
+            'fromId' : self.frameLayer.getMyId(),
+            'toId' : 0,
+            'payload' : 'resp'+str(sourceId)})
+        rnd = self.dispatcher.roundProvider.getRoundNumber()+1
+        self.dispatcher.roundProvider.scheduleFrame(frame, rnd)
+        log('Sending sync resp frame at round %d' % (rnd))
 
     def _changeState(self, newState):
         self.state = newState
@@ -151,7 +157,8 @@ class TimeSyncProto(Proto):
         if recvTime > sendTime and self.state == State.SYNCED:
             #We have a message from a younger node and we can correct it authoritatively
             log('Timing recieved from younger node (%d by %d)' % (frame['fromId'], recvTime - sendTime))
-            self._sendSyncResponse()
+            self.syncResponseRequests.add(frame['fromId'])
+            self.dispatcher.scheduleCallback(lambda : self._sendSyncResponse(frame['fromId']), time.time()+ random.uniform(1, 10)*self.dispatcher.roundProvider.getRoundDuration()/1000000.0)
             return
         if recvTime < sendTime and not (frame['ftype'] == 's' and frame['payload'] == 'req'):
             #We got a packet from an older node that isn't asking for the time
@@ -159,3 +166,7 @@ class TimeSyncProto(Proto):
             log('Timing recieved from older node %d, updating by %d' % (frame['fromId'], delta))
             self.offsetFromLocalTime += delta
             self._changeState(State.SYNCED)
+        if recvTime <= sendTime and frame['ftype'] == 's' and frame['payload'].startswith('resp'):
+            source = int(frame['payload'][4:])
+            if source in self.syncResponseRequests:
+                self.syncResponseRequests.remove(source)
