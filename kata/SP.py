@@ -10,7 +10,6 @@ class SP(Proto):
         Proto.__init__(self)
         self.frameTypes=''
     
-    
     def onStart(self):
         self.dispatcher.timeManager.callOnSync(self.sendBeacon)
 
@@ -20,7 +19,7 @@ class SP(Proto):
     def sendBeacon(self):
         frame = Frame({
             'ftype': 'x',
-            'fromId': 0,
+            'fromId': self.frameLayer.getMyId(),
             'toId': 0,
             'payload': 'butt'})
         self.dispatcher.roundProvider.scheduleFrame(frame,self.dispatcher.roundProvider.getRoundNumber()+20)
