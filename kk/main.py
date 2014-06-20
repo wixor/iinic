@@ -7,6 +7,7 @@ from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
 from KeepAlive import KeepAlive
+from Neighbourhood import Neighbourhood
 from PingPongProto import PingPongProto
 from MonitorProto import MonitorProto
 import Config
@@ -43,6 +44,11 @@ def main(mode, interface):
     if mode == 'k':
         keepalive = KeepAlive()
         dispatcher.registerProto(keepalive, 'keepalive')
+        dispatcher.loop()
+
+    if mode == 'n':
+        neighbourhood = Neighbourhood()
+        dispatcher.registerProto(neighbourhood, 'neighbourhood')
         dispatcher.loop()
 
     if mode == 'd':
