@@ -67,40 +67,21 @@ void iinic_get_now(iinic_timing *out)
     uint8_t t0, t1;
 
     asm volatile(
-        "in   %0, 0x39\n\t" // TIMSK
-        "andi %0, 0xFB\n\t" // ~TOIE1
-        "out  0x39, %0\n\t" // TIMSK
-
+     "1: lds  %1, timing_high+0\n\t"
+        "std  %a2+2, %1\n\t"
+        "lds  %0, timing_high+1\n\t"
+        "std  %a2+3, %0\n\t"
+        "lds  %0, timing_high+2\n\t"
+        "std  %a2+4, %0\n\t"
+        "lds  %0, timing_high+3\n\t"
+        "std  %a2+5, %0\n\t"
         "in   %0, 0x2c\n\t" // TCNT1L
-        "in   %1, 0x38\n\t" // TIFR
-        "andi %1, 4\n\t" // TOV1
-        "breq 1f\n\t"
-        "ldi  %1, 0xFF\n\t"
-        "in   %0, 0x2c\n\t" // TCNT1L
-     "1: std  %a2+0, %0\n\t"
+        "std  %a2+0, %0\n\t"
         "in   %0, 0x2d\n\t" // TCNT1H
         "std  %a2+1, %0\n\t"
-
         "lds  %0, timing_high+0\n\t"
-        "sub  %0, %1\n\t"
-        "std  %a2+2, %0\n\t"
-
-        "lds  %0, timing_high+1\n\t"
-        "sbc  %0, %1\n\t"
-        "std  %a2+3, %0\n\t"
-
-        "lds  %0, timing_high+2\n\t"
-        "sbc  %0, %1\n\t"
-        "std  %a2+4, %0\n\t"
-
-        "lds  %0, timing_high+3\n\t"
-        "sbc  %0, %1\n\t"
-        "std  %a2+5, %0\n\t"
-
-        "in   %0, 0x39\n\t" // TIMSK
-        "ori  %0, 0x04\n\t" // ~TOIE1
-        "out  0x39, %0\n\t" // TIMSK
-
+        "cp   %0, %1\n\t"
+        "brne 1b\n\t"
         : "=&a" (t0), "=&a" (t1)
         : "b" (out)
     );
@@ -108,34 +89,83 @@ void iinic_get_now(iinic_timing *out)
 
 int8_t iinic_now_cmp(const iinic_timing *ref)
 {
-    return 0;
+    int8_t t0, t1, t2;
+
+    asm volatile(
+     "1: lds  %2, timing_high+0\n\t"
+
+        "in   %0, 0x2c\n\t" // TCNT1L
+        "ldd  %1, %a3+0\n\t"
+        "cp   %0, %1\n\t"
+
+        "in   %0, 0x2d\n\t" // TCNT1H
+        "ldd  %1, %a3+1\n\t"
+        "cpc  %0, %1\n\t"
+
+        "ldd  %1, %a3+2\n\t"
+        "cpc  %2, %1\n\t"
+
+        "lds  %0, timing_high+1\n\t"
+        "ldd  %1, %a3+3\n\t"
+        "cpc  %0, %1\n\t"
+
+        "lds  %0, timing_high+2\n\t"
+        "ldd  %1, %a3+4\n\t"
+        "cpc  %0, %1\n\t"
+
+        "lds  %0, timing_high+3\n\t"
+        "ldd  %1, %a3+5\n\t"
+        "cpc  %0, %1\n\t"
+
+        "ldi %0, 0\n\t"
+        "breq 2f\n\t"
+        "ldi %0, 0xff\n\t"
+        "brlo 2f\n\t"
+        "ldi %0, 1\n\t"
+
+     "2: lds  %1, timing_high+0\n\t"
+        "cp   %1, %2\n\t"
+        "brne 1b\n\t"
+
+        : "=&a" (t0), "=&a" (t1), "=&a" (t2)
+        : "b" (ref)
+    );
+    return t0;
 }
 
 void iinic_timing_add_32(iinic_timing *a, int32_t b)
 {
-    uint8_t t0;
+    uint8_t t0, t1;
     asm volatile(
-        "ldd %0, %a2+0\n\t"
-        "add %0, %A1\n\t"
-        "std %a2+0, %0\n\t"
+        "ldd %0, %a3+0\n\t"
+        "add %0, %A2\n\t"
+        "std %a3+0, %0\n\t"
 
-        "ldd %0, %a2+1\n\t"
-        "adc %0, %B1\n\t"
-        "std %a2+1, %0\n\t"
+        "ldd %0, %a3+1\n\t"
+        "adc %0, %B2\n\t"
+        "std %a3+1, %0\n\t"
 
-        "ldd %0, %a2+2\n\t"
-        "adc %0, %C1\n\t"
-        "std %a2+2, %0\n\t"
+        "ldd %0, %a3+2\n\t"
+        "adc %0, %C2\n\t"
+        "std %a3+2, %0\n\t"
 
-        "ldd %0, %a2+3\n\t"
-        "adc %0, %D1\n\t"
-        "std %a2+3, %0\n\t"
+        "ldd %0, %a3+3\n\t"
+        "adc %0, %D2\n\t"
+        "std %a3+3, %0\n\t"
 
-        "ldd %0, %a2+4\n\t"
-        "adc %0, __zero_reg__\n\t"
-        "std %a2+4, %0\n\t"
+        "mov %1, %D2\n\t"
+        "rol %1\n\t"
+        "sbc %1, %1\n\t"
 
-        : "=&a" (t0)
+        "ldd %0, %a3+4\n\t"
+        "adc %0, %1\n\t"
+        "std %a3+4, %0\n\t"
+
+        "ldd %0, %a3+5\n\t"
+        "adc %0, %1\n\t"
+        "std %a3+5, %0\n\t"
+
+        : "=&a" (t0), "=&a" (t1)
         : "a" (b), "b" (a)
     );
 }
@@ -222,28 +252,28 @@ int8_t iinic_timing_cmp(const iinic_timing *a, const iinic_timing *b)
 {
     int8_t t0, t1;
     asm volatile(
-        "ldd %0, %a2+5\n\t"
-        "ldd %1, %a3+5\n\t"
+        "ldd %0, %a2+0\n\t"
+        "ldd %1, %a3+0\n\t"
         "cp  %0, %1\n\t"
 
-        "ldd %0, %a2+4\n\t"
-        "ldd %1, %a3+4\n\t"
-        "cpc %0, %1\n\t"
-
-        "ldd %0, %a2+3\n\t"
-        "ldd %1, %a3+3\n\t"
+        "ldd %0, %a2+1\n\t"
+        "ldd %1, %a3+1\n\t"
         "cpc %0, %1\n\t"
 
         "ldd %0, %a2+2\n\t"
         "ldd %1, %a3+2\n\t"
         "cpc %0, %1\n\t"
 
-        "ldd %0, %a2+1\n\t"
-        "ldd %1, %a3+1\n\t"
+        "ldd %0, %a2+3\n\t"
+        "ldd %1, %a3+3\n\t"
         "cpc %0, %1\n\t"
 
-        "ldd %0, %a2+0\n\t"
-        "ldd %1, %a3+0\n\t"
+        "ldd %0, %a2+4\n\t"
+        "ldd %1, %a3+4\n\t"
+        "cpc %0, %1\n\t"
+
+        "ldd %0, %a2+5\n\t"
+        "ldd %1, %a3+5\n\t"
         "cpc %0, %1\n\t"
 
         "ldi %0, 0\n\t"
@@ -316,16 +346,14 @@ static uint8_t radio_io(uint8_t v)
     return SPDR;
 }
 
-static inline void radio_write(uint16_t v) {
-    __iinic_radio_write(v);
-}
-void __iinic_radio_write(uint16_t v)
+static void radio_write(uint16_t v)
 {
     radio_begin();
     radio_io(v >> 8);
     radio_io(v & 0xff);
     radio_end();
 }
+void __iinic_radio_write(uint16_t v) __attribute__ (( alias("radio_write") ));
 
 static inline void radio_irq_disable() {
     GICR &= ~_BV(INT0);
@@ -487,7 +515,12 @@ static inline void radio_tx(uint8_t v) {
 
 /* ------------------------------------------------------------------------- */
 
-static uint8_t state;
+uint8_t __iinic_state;
+#define state __iinic_state
+
+int32_t __iinic_rx_timing_offset;
+#define rx_timing_offset __iinic_rx_timing_offset
+
 static uint8_t tx_framing;
 
 uint16_t iinic_mac;
@@ -504,12 +537,12 @@ void iinic_set_buffer(uint8_t *buf, uint16_t len)
     if((IINIC_RX_IDLE | IINIC_RX_ACTIVE | IINIC_TX_ACTIVE) & state)
         panic();
 
-    if(iinic_buffer_end <= iinic_buffer)
-        panic();
-
     iinic_buffer = buf;
     iinic_buffer_ptr = buf;
     iinic_buffer_end = buf + len;
+
+    if(iinic_buffer_end <= iinic_buffer)
+        panic();
 }
 
 void iinic_rx()
@@ -623,13 +656,15 @@ static void do_rx()
     if(IINIC_RX_IDLE & state)
     {
         if(!dqd) {
-            radio_enable_rxfifo();
             radio_disable_rxfifo();
+            radio_enable_rxfifo();
             return;
         }
 
         state = IINIC_RX_ACTIVE;
-        iinic_get_now(&iinic_rx_timing);
+        iinic_get_now(&iinic_rx_timing); /* measured delay since interrupt start: 23.84us
+                                            measured execution time : 2.64us */
+        iinic_timing_add_32(&iinic_rx_timing, rx_timing_offset);
     }
     else
     {
@@ -673,16 +708,15 @@ ISR(INT0_vect)
 
 /* ------------------------------------------------------------------------- */
 
-static void dumb_wait(uint8_t n) /* 1 wait round is ~ 17.(7) ms */
+static void dumb_wait(uint8_t n) /* 1 wait round is ~ 10 ms */
 {
     uint16_t i;
     asm volatile(
-       "wdr\n\t"
-       "eor %A0, %A0\n\t"
-       "eor %B0, %B0\n\t"
-    "1: adiw %0, 1\n\t" /* 2 cycles */
-       "brne 1b\n\t" /* 2 cycles */
-       "wdr\n\t" /* 1 cycle */
+    "1: wdr\n\t"
+       "ldi %A0, 0x00\n\t"
+       "ldi %B0, 0x70\n\t"
+    "2: adiw %0, 1\n\t" /* 2 cycles */
+       "brne 2b\n\t" /* 2 cycles */
        "dec %1\n\t" /* 1 cycle */
        "brne 1b\n\t" /* 2 cycles */
        : "=w" (i), "+r" (n)
@@ -696,10 +730,11 @@ static void panic()
     iinic_led_off(IINIC_LED_GREEN);
     iinic_led_on(IINIC_LED_RED);
     for(;;) {
-        dumb_wait(15);
+        dumb_wait(20);
         iinic_led_toggle(IINIC_LED_RED);
     }
 }
+void __iinic_panic() __attribute__ (( noreturn, alias("panic") ));
 
 static uint16_t read_mac()
 {
@@ -717,13 +752,13 @@ static uint16_t read_mac()
 static FILE iinic_stdout;
 static int usart_tx(char c, FILE *f) {
     (void) f;
-    do wdt_reset(); while(!(UCSRA & UDRE));
+    do wdt_reset(); while(!(UCSRA & _BV(UDRE)));
     UDR = c;
     return 0;
 }
 void iinic_usart_is_debug()
 {
-    /* usart: 230400, 8n1, rx interrupt, tx idle interrupt */
+    /* usart: 230400, 8n1, no interrupts */
     UBRRH = 0;
     UBRRL = 3;
     UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);
@@ -745,12 +780,12 @@ int main(void)
     ACSR |= _BV(ACD);
 
     PORTA=0b00000000; DDRA=0b00000000; /* port A: analog inputs + arssi */
-    PORTB=0b11111111; DDRB=0b10110001; /* port B: sck,miso,mosi,ss, data,vdi,!radio_rst, nc */
+    PORTB=0b11111110; DDRB=0b10110000; /* port B: sck,miso,mosi,ss, data,vdi,!radio_rst, button */
     PORTC=0b11111111; DDRC=0b11000000; /* port C: led1,led2, jtag, i2c */
     PORTD=0b11101111; DDRD=0b11110010; /* port D: nc,nc, !usb_rst,!cts, ffit,!radio_irq, txd,rxd */
 
-    /* wait around .5s to show the user that we're resetting stuff */
-    dumb_wait(30);
+    /* wait .5s to show the user that we're resetting stuff */
+    dumb_wait(50);
 
     /* spi: no interrupts, master mode, F_CPU/8 */
     SPSR = _BV(SPI2X);
