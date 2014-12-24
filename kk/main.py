@@ -7,6 +7,7 @@ from Frame import Frame, FrameLayer
 from Proto import Proto
 from Dispatcher import Dispatcher
 from KeepAlive import KeepAlive
+from Neighbourhood import Neighbourhood
 from PingPongProto import PingPongProto
 from MonitorProto import MonitorProto
 import Config
@@ -29,8 +30,12 @@ class SampleProto(Proto):
     def onStart(self):
         pass
 
-def main(mode):
-    comm = iinic.USBComm() if Config.ON_DEVICE else iinic.NetComm()
+def main(mode, interface):
+    if interface == 'net':
+        comm = iinic.NetComm()
+    else:
+        comm = iinic.USBComm(interface)
+    #comm = iinic.USBComm() if Config.ON_DEVICE else iinic.NetComm()
     nic = iinic.NIC(comm)
     frameLayer = FrameLayer(nic)
     myId = frameLayer.getMyId()
@@ -39,6 +44,11 @@ def main(mode):
     if mode == 'k':
         keepalive = KeepAlive()
         dispatcher.registerProto(keepalive, 'keepalive')
+        dispatcher.loop()
+
+    if mode == 'n':
+        neighbourhood = Neighbourhood()
+        dispatcher.registerProto(neighbourhood, 'neighbourhood')
         dispatcher.loop()
 
     if mode == 'd':
@@ -69,8 +79,8 @@ def main(mode):
         frameLayer.sendFrame('x', myId, 0, 'blah blah', approx + 2000000)
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print 'Usage:', sys.argv[0], '[r|s|d|k]'
+    if len(sys.argv) != 3:
+        print 'Usage:', sys.argv[0], '[r|s|d|k]', '[net|USB interface]'
         sys.exit(1)
         
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])
