@@ -102,8 +102,9 @@ enum {
 
 /* internal, do not touch! */
 void __iinic_radio_write(uint16_t);
-void __iinic_panic() __attribute__ (( noreturn ));
+void __attribute__ (( noreturn )) __iinic_panic();
 extern uint8_t __iinic_state;
+extern volatile uint8_t __iinic_signals;
 extern int32_t __iinic_rx_timing_offset;
 
 extern uint16_t iinic_mac;
@@ -199,14 +200,8 @@ void iinic_rx();
 void iinic_tx();
 void iinic_idle();
 
-static inline void iinic_signal_irqlocked() {
-    *(volatile uint8_t *)&__iinic_state |= IINIC_SIGNAL;
-}
 static inline void iinic_signal() {
-    uint8_t gicr = GICR;
-    GICR = gicr &~ _BV(INT0);
-    iinic_signal_irqlocked();
-    GICR = gicr;
+    __iinic_signals++;
 }
 
 uint8_t iinic_infinite_poll(uint8_t mask);
@@ -214,6 +209,10 @@ uint8_t iinic_instant_poll(uint8_t mask);
 uint8_t iinic_timed_poll(uint8_t mask, const iinic_timing *deadline);
 
 void iinic_usart_is_debug();
+
+uint8_t iinic_random_8();
+uint16_t iinic_random_16();
+uint32_t iinic_random_32();
 
 #endif
 

@@ -1,4 +1,5 @@
 #include <avr/pgmspace.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 #include "iinic.h"
@@ -8,7 +9,7 @@ static uint8_t buffer[256];
 void iinic_main()
 {
     iinic_usart_is_debug();
-    printf_P(PSTR("Hello, world!\r\n"));
+    printf_P(PSTR("Hello, world; random: %ld!\r\n"), random());
 
     for(;;) {
         iinic_set_buffer(buffer, sizeof(buffer));

@@ -1,3 +1,4 @@
+#include <stdlib.h> /* for srandom() */
 #include <stdio.h> /* yes, avr has stdio! */
 #include <stdint.h>
 #include <stdbool.h>
@@ -15,7 +16,7 @@ static inline __attribute__((always_inline)) void nop() {
     asm volatile("nop\n\t");
 }
 
-static void panic() __attribute__((noreturn));
+static void __attribute__((noreturn)) panic();
 
 /* ------------------------------------------------------------------------- */
 
@@ -292,6 +293,101 @@ int8_t iinic_timing_cmp(const iinic_timing *a, const iinic_timing *b)
 
 /* ------------------------------------------------------------------------- */
 
+static volatile uint8_t random_pool[8];
+static volatile uint8_t random_bits;
+
+ISR(ADC_vect, ISR_NAKED)
+{
+    asm volatile(
+        "push r16\n\t"
+        "in   r16, __SREG__\n\t"
+        "push r16\n\t"
+        "push r17\n\t"
+
+        "lds  r16, random_bits\n\t"
+        "cpi  r16, 128\n\t"
+        "brlo 1f\n\t"
+
+        "cbi  0x06, 3\n\t" // ADCSRA, ADIE
+        "pop  r17\n\t"
+        "pop  r16\n\t"
+        "out  __SREG__, r16\n\t"
+        "pop  r16\n\t"
+        "reti\n\t"
+
+     "1: inc  r16\n\t"
+        "sts  random_bits, r16\n\t"
+
+        "lds  r16, random_pool+7\n\t"
+        "bst  r16, 7\n\t"
+
+        "in   r16, 4\n\t" // ADCL
+        "in   r17, 5\n\t" // ADCH
+        "ror  r16\n\t"
+
+#define _crc_bit(offs, xor) \
+        "lds  r17, random_pool + " #offs "\n\t" \
+        "rol  r17\n\t" \
+        "brtc 1f\n\t" \
+        "ldi  r16, " #xor "\n\t" \
+        "eor  r17, r16\n\t" \
+     "1: sts  random_pool + " #offs ", r17\n\t"
+
+        _crc_bit(0, 0x93)
+        _crc_bit(1, 0x36)
+        _crc_bit(2, 0xea)
+        _crc_bit(3, 0xa9)
+        _crc_bit(4, 0xeb)
+        _crc_bit(5, 0xe1)
+        _crc_bit(6, 0xf0)
+        _crc_bit(7, 0x42)
+
+#undef _crc_bit
+
+        "pop  r17\n\t"
+        "pop  r16\n\t"
+        "out  __SREG__, r16\n\t"
+        "pop  r16\n\t"
+        "reti\n\t"
+    );
+}
+
+uint8_t iinic_random_8()
+{
+    while(random_bits < 128) wdt_reset();
+
+    ADCSRA &=~ _BV(ADIE);
+    uint8_t ret = *(random_pool+7);
+    random_bits = 128 - 16;
+    ADCSRA |= _BV(ADIE);
+    return ret;
+}
+
+uint16_t iinic_random_16()
+{
+    while(random_bits < 128) wdt_reset();
+
+    ADCSRA &=~ _BV(ADIE);
+    uint16_t ret = *(volatile uint16_t *)(random_pool+6);
+    random_bits = 128 - 32;
+    ADCSRA |= _BV(ADIE);
+    return ret;
+}
+
+uint32_t iinic_random_32()
+{
+    while(random_bits < 128) wdt_reset();
+
+    ADCSRA &=~ _BV(ADIE);
+    uint32_t ret = *(volatile uint32_t *)(random_pool+4);
+    random_bits = 128 - 64;
+    ADCSRA |= _BV(ADIE);
+    return ret;
+}
+
+/* ------------------------------------------------------------------------- */
+
+
 enum {
     /* radio status: high byte */
     RADIO_RGIT = 7, /* TX register is ready to receive the next byte */
@@ -353,7 +449,7 @@ static void radio_write(uint16_t v)
     radio_io(v & 0xff);
     radio_end();
 }
-void __iinic_radio_write(uint16_t v) __attribute__ (( alias("radio_write") ));
+void __attribute__ (( alias("radio_write") ))__iinic_radio_write(uint16_t v);
 
 static inline void radio_irq_disable() {
     GICR &= ~_BV(INT0);
@@ -518,6 +614,9 @@ static inline void radio_tx(uint8_t v) {
 uint8_t __iinic_state;
 #define state __iinic_state
 
+volatile uint8_t __iinic_signals;
+#define signals __iinic_signals
+
 int32_t __iinic_rx_timing_offset;
 #define rx_timing_offset __iinic_rx_timing_offset
 
@@ -588,21 +687,29 @@ void iinic_idle()
     radio_irq_enable();
 }
 
+static inline uint8_t do_poll(uint8_t mask) {
+    uint8_t ret = mask & must_read(state);
+    if(must_read(signals) && (mask & IINIC_SIGNAL)) {
+        must_write(signals) = 0;
+        ret |= IINIC_SIGNAL;
+    }
+    return ret;
+}
 uint8_t iinic_instant_poll(uint8_t mask) {
     wdt_reset();
-    return mask & must_read(state);
+    return do_poll(mask);
 }
 uint8_t iinic_infinite_poll(uint8_t mask)
 {
     uint8_t v;
-    while(!(v = (mask & must_read(state))))
+    while(!(v = do_poll(mask)))
         wdt_reset();
     return v;
 }
 uint8_t iinic_timed_poll(uint8_t mask, const iinic_timing *deadline)
 {
     uint8_t v;
-    while(!(v = (mask & must_read(state))) && iinic_now_cmp(deadline) < 0)
+    while(!(v = do_poll(mask)) && iinic_now_cmp(deadline) < 0)
         wdt_reset();
     return v;
 }
@@ -734,7 +841,7 @@ static void panic()
         iinic_led_toggle(IINIC_LED_RED);
     }
 }
-void __iinic_panic() __attribute__ (( noreturn, alias("panic") ));
+void __attribute__ (( noreturn, alias("panic") )) __iinic_panic();
 
 static uint16_t read_mac()
 {
@@ -784,9 +891,6 @@ int main(void)
     PORTC=0b11111111; DDRC=0b11000000; /* port C: led1,led2, jtag, i2c */
     PORTD=0b11101111; DDRD=0b11110010; /* port D: nc,nc, !usb_rst,!cts, ffit,!radio_irq, txd,rxd */
 
-    /* wait .5s to show the user that we're resetting stuff */
-    dumb_wait(50);
-
     /* spi: no interrupts, master mode, F_CPU/8 */
     SPSR = _BV(SPI2X);
     SPCR = _BV(SPE) | _BV(MSTR) | _BV(SPR0);
@@ -795,9 +899,9 @@ int main(void)
     TCCR1B = _BV(CS11);
     TIMSK = _BV(TOIE1);
 
-    /* adc: internal 2.56V vref, free-running, 115.2kHz clock */
+    /* adc: internal 2.56V vref, free-running, interrupts enabled, 115.2kHz clock */
     ADMUX = _BV(REFS1) | _BV(REFS0);
-    ADCSRA = _BV(ADEN) | _BV(ADSC) | _BV(ADATE) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
+    ADCSRA = _BV(ADEN) | _BV(ADSC) | _BV(ADATE) | _BV(ADIE) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0);
 
     /* int0: low-level-triggered, not enabled yet */
     MCUCR = 0;
@@ -809,6 +913,18 @@ int main(void)
     if(mcucsr & _BV(WDRF))
         panic();
 
+    /* read mac from eeprom */
+    iinic_mac = read_mac();
+
+    /* interrupts start (needed for random generator) */
+    sei();
+
+    /* wait .5s to show the user that we're resetting stuff */
+    dumb_wait(50);
+
+    /* seed pseudo-random number generator */
+    srandom(0x7fffffff & iinic_random_32());
+
     /* initialize the radio chip */
     radio_reset();
     radio_set_data_filter();
@@ -818,12 +934,8 @@ int main(void)
     iinic_set_tx_knobs(DEFAULT_TX_KNOBS);
     iinic_idle();
 
-    /* read mac from eeprom */
-    iinic_mac = read_mac();
-
     /* show everyone we're up */
     iinic_led_on(IINIC_LED_GREEN);
-    sei();
 
     /* run user code */
     iinic_main();
