@@ -137,6 +137,10 @@ void iinic_timing_add_32(iinic_timing *a, int32_t b)
 {
     uint8_t t0, t1;
     asm volatile(
+        "mov %1, %D2\n\t"
+        "rol %1\n\t"
+        "sbc %1, %1\n\t"
+
         "ldd %0, %a3+0\n\t"
         "add %0, %A2\n\t"
         "std %a3+0, %0\n\t"
@@ -152,10 +156,6 @@ void iinic_timing_add_32(iinic_timing *a, int32_t b)
         "ldd %0, %a3+3\n\t"
         "adc %0, %D2\n\t"
         "std %a3+3, %0\n\t"
-
-        "mov %1, %D2\n\t"
-        "rol %1\n\t"
-        "sbc %1, %1\n\t"
 
         "ldd %0, %a3+4\n\t"
         "adc %0, %1\n\t"
