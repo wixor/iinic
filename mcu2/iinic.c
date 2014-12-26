@@ -650,8 +650,10 @@ void iinic_rx()
 
     if(IINIC_TX_ACTIVE & state)
         panic();
-    if(IINIC_RX_IDLE & state)
+    if((IINIC_RX_IDLE | IINIC_RX_ACTIVE) & state) {
+        radio_irq_enable();
         return;
+    }
 
     iinic_buffer_ptr = iinic_buffer;
     iinic_rx_rssi = 0;
