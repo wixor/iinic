@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <avr/io.h>
 
 enum {
@@ -98,6 +99,13 @@ enum {
     IINIC_TX_COMPLETE = _BV(5),
 
     IINIC_SIGNAL = _BV(7),
+};
+
+/* analog rssi value is in range 0.3v .. 1.2v;
+ * that is 120 .. 480 in adc values. */
+enum {
+    IINIC_RSSI_MIN = 120,
+    IINIC_RSSI_MAX = 480
 };
 
 /* internal, do not touch! */
@@ -209,6 +217,7 @@ uint8_t iinic_instant_poll(uint8_t mask);
 uint8_t iinic_timed_poll(uint8_t mask, const iinic_timing *deadline);
 
 void iinic_usart_is_debug();
+#define debug(fmt, ...) printf_P(PSTR("" fmt), ## __VA_ARGS__)
 
 uint8_t iinic_random_8();
 uint16_t iinic_random_16();
