@@ -702,15 +702,17 @@ uint8_t iinic_instant_poll(uint8_t mask) {
 uint8_t iinic_infinite_poll(uint8_t mask)
 {
     uint8_t v;
-    while(!(v = do_poll(mask)))
+    do
         wdt_reset();
+    while(!(v = do_poll(mask)));
     return v;
 }
 uint8_t iinic_timed_poll(uint8_t mask, const iinic_timing *deadline)
 {
     uint8_t v;
-    while(!(v = do_poll(mask)) && iinic_now_cmp(deadline) < 0)
+    do
         wdt_reset();
+    while(!(v = do_poll(mask)) && iinic_now_cmp(deadline) < 0);
     return v;
 }
 
