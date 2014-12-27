@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <avr/pgmspace.h>
 #include <avr/io.h>
 
 enum {
