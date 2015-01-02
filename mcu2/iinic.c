@@ -891,7 +891,7 @@ int main(void)
     ACSR |= _BV(ACD);
 
     PORTA=0b00000000; DDRA=0b00000000; /* port A: analog inputs + arssi */
-    PORTB=0b11111110; DDRB=0b10110000; /* port B: sck,miso,mosi,ss, data,vdi,!radio_rst, button */
+    PORTB=0b11111111; DDRB=0b10110000; /* port B: sck,miso,mosi,ss, data,vdi,!radio_rst, button */
     PORTC=0b11111111; DDRC=0b11000000; /* port C: led1,led2, jtag, i2c */
     PORTD=0b11101111; DDRD=0b11110010; /* port D: nc,nc, !usb_rst,!cts, ffit,!radio_irq, txd,rxd */
 
