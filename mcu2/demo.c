@@ -1,4 +1,5 @@
 #include <util/crc16.h>
+#include <avr/interrupt.h>
 
 #include "iinic.h"
 
@@ -22,26 +23,28 @@ struct packet_hdr {
     int32_t seq;
     uint8_t length;
     unsigned neighbour_infos : 4;
-    unsigned _unused : 1;
+    unsigned button_dist : 4;
     unsigned mask_id : 2;
-    unsigned button : 1;
+    unsigned _unused : 6;
 };
 
 struct packet_neighbour_info {
     uint16_t who;
-    unsigned match : 5;
     unsigned mask_id : 2;
-    unsigned button : 1;
+    unsigned match : 5;
+    unsigned _unused : 5;
+    unsigned button_dist : 4;
 };
 
 struct node_info {
     uint16_t who;
     int32_t seq_1, seq_2;
-    uint8_t mask;
+    uint16_t rssi;
+    bool tier_one;
+    bool sent;
     uint8_t match;
-    unsigned tier_one : 1;
-    unsigned button : 1;
-    unsigned sent : 1;
+    uint8_t mask;
+    uint8_t button_dist;
 };
 
 enum {
@@ -59,6 +62,9 @@ static uint8_t nodes_count;
 static bool nodes_changed;
 static uint8_t until_schedule;
 static uint8_t tx_mask, tx_match;
+
+static volatile uint8_t my_button_dist;
+static volatile uint8_t my_connectivity; // 0 = not connected, 1 = some tier2-s, 2 = have tier1
 
 /* ------------------------------------------------------------------------- */
 
@@ -145,7 +151,7 @@ static void schedule(int32_t seq)
     {
         if(n->tier_one && n->seq_1 < seq - NODE_TIER_1_TTL) {
             debug("demoting node %04x to tier 2\r\n", n->who);
-            n->tier_one = 0;
+            n->tier_one = false;
             nodes_changed = true;
         }
         if(n->seq_2 < seq - NODE_TIER_2_TTL) {
@@ -181,8 +187,8 @@ static void schedule(int32_t seq)
 
     for(struct node_info *n = nodes; n < nodes + nodes_count; n++) {
         uint32_t bitmap = get_tx_bitmap(n->mask, n->match);
-        debug("%04x : tier %d mask %02x match %02x seq %9ld / %9ld\r\n",
-                n->who, n->tier_one ? 1 : 2, n->mask, n->match, n->seq_1, n->seq_2);
+        debug("%04x : tier %d mask %02x match %02x seq %9ld / %9ld rssi %3d btn %d\r\n",
+                n->who, n->tier_one ? 1 : 2, n->mask, n->match, n->seq_1, n->seq_2, n->rssi, n->button_dist);
         if(n->tier_one) {
             if(tier1_bitmap & bitmap)
                 debug("  collision!\r\n");
@@ -271,15 +277,17 @@ static void update_node(struct node_info *incomming)
 
     if(incomming->tier_one && !n->tier_one) {
         debug("sched: node %04x promoted to tier one\r\n", n->who);
-        n->tier_one = 1;
+        n->tier_one = true;
         n->sent = 0;
         nodes_changed = true;
     }
 
-    if(n->tier_one)
+    if(n->tier_one) {
         n->seq_1 = incomming->seq_1;
-    n->seq_2 = incomming->seq_1;
-    n->button = incomming->button;
+        n->rssi = incomming->rssi;
+    }
+    n->seq_2 = incomming->seq_2;
+    n->button_dist = incomming->button_dist;
     n->sent = 0;
 
     if(n->mask != incomming->mask || n->match != incomming->match) {
@@ -329,10 +337,11 @@ static void receive(uint8_t *rxbuf, uint16_t rxlen, uint16_t rssi, const round_t
         struct node_info n;
         n.who = hdr->sender;
         n.seq_1 = n.seq_2 = seq;
+        n.rssi = rssi;
         n.mask = mask_id_dec(hdr->mask_id);
         n.match = seq & n.mask;
-        n.tier_one = 1;
-        n.button = !!hdr->button;
+        n.tier_one = true;
+        n.button_dist = hdr->button_dist;
         update_node(&n);
     }
 
@@ -346,10 +355,11 @@ static void receive(uint8_t *rxbuf, uint16_t rxlen, uint16_t rssi, const round_t
         struct node_info n;
         n.who = ni->who;
         n.seq_1 = n.seq_2 = seq;
+        n.rssi = 0;
         n.mask = mask_id_dec(ni->mask_id);
         n.match = ni->match;
-        n.tier_one = 0;
-        n.button = !!ni->button;
+        n.tier_one = false;
+        n.button_dist = ni->button_dist;
         update_node(&n);
     }
 }
@@ -369,7 +379,7 @@ static uint16_t transmit(uint8_t *txbuf, int32_t seq)
         ni->who = n->who;
         ni->match = n->match;
         ni->mask_id = mask_id_enc(n->mask);
-        ni->button = n->button;
+        ni->button_dist = n->button_dist;
         n->sent = 1;
         ni++;
         neighbour_infos++;
@@ -382,15 +392,57 @@ static uint16_t transmit(uint8_t *txbuf, int32_t seq)
     hdr->neighbour_infos = neighbour_infos;
     hdr->_unused = 0;
     hdr->mask_id = mask_id_enc(tx_mask);
-    hdr->button = iinic_read_button();
+    hdr->button_dist = my_button_dist;
 
     overwrite_crc(txbuf, hdr->length);
     return hdr->length;
 }
 
+static void update_my_button_dist_and_connectivity()
+{
+    bool t1 = false;
+    uint16_t bd = iinic_read_button() ? 0 : 15;
+
+    for(struct node_info *n = nodes; n < nodes + nodes_count; n++)
+        if(n->tier_one) {
+            t1 = true;
+            if(n->button_dist+1 < bd)
+                bd = n->button_dist+1;
+        }
+
+    my_connectivity = t1 ? 2 : nodes_count ? 1 : 0;
+    my_button_dist = bd;
+}
+
+ISR(TIMER0_COMP_vect)
+{
+    static uint8_t c;
+    c = (c+1) & 63;
+
+    uint8_t con = my_connectivity;
+    if((1 == con && c < 4) || (2 == con && (c < 4 || (c > 8 && c < 16))))
+        iinic_led_off(IINIC_LED_GREEN);
+    else
+        iinic_led_on(IINIC_LED_GREEN);
+
+    static int8_t dist_blinks;
+    if((c & 15) == 0) {
+        if(-4 == dist_blinks)
+            dist_blinks = (1+my_button_dist) & 15;
+        if(dist_blinks > 0)
+            iinic_led_on(IINIC_LED_RED);
+        dist_blinks --;
+    } else
+        iinic_led_off(IINIC_LED_RED);
+}
 
 void __attribute__((noreturn)) iinic_main()
 {
+    /* timer0: ctc mode, F_CPU/1024, interrupts on clear (f = 1/64 s) */
+    OCR0 = 224;
+    TCCR0 = _BV(WGM01) | _BV(CS02) | _BV(CS00);
+    TIMSK |= _BV(OCIE0);
+
     iinic_set_rx_knobs(IINIC_RSSI_91 | IINIC_GAIN_20 | IINIC_BW_270);
     iinic_set_tx_knobs(IINIC_POWER_75 | IINIC_DEVIATION_240);
     iinic_set_bitrate(IINIC_BITRATE_57600);
@@ -414,6 +466,8 @@ void __attribute__((noreturn)) iinic_main()
 
         schedule(seq);
         seq = seq_delta + rt.seq;
+
+        update_my_button_dist_and_connectivity();
 
         uint8_t *rxbuf = iinic_buffer;
         uint8_t *txbuf = buf1 == iinic_buffer ? buf2 : buf1;
