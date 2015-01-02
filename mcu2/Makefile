@@ -13,10 +13,10 @@ SIZE      := avr-size
 OBJCOPY   := avr-objcopy
 DUDE      := sudo avrdude -p $(DUDEMCU) -c stk500v2 -P usb -q -q
 
-CFLAGS	  := -DF_CPU=14745600 -O2 -std=gnu99 -pipe -mmcu=$(MCU) \
-	         -fpack-struct -frename-registers -fshort-enums \
-			 -Wall -Wextra -Wshadow \
-			 -Wl,-u,vfprintf -lprintf_min
+CFLAGS	  := -DF_CPU=14745600 -DNDEBUG -O2 -std=gnu99 -g2 -mmcu=$(MCU) \
+             -fpack-struct -fshort-enums -funsigned-char -funsigned-bitfields \
+             -ffunction-sections -fdata-sections -Wl,--gc-sections \
+             -Wall -Wextra -Wshadow -Wl,-u,vfprintf -lprintf_min
 
 .PHONY: build clean erase flash fuses lock burn
 
